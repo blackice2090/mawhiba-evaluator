@@ -36,6 +36,8 @@ describes the student's project rather than the system.
 DEFAULT_EXTRACTION_MODEL = "gpt-5.6-terra"
 DEFAULT_CLASSIFICATION_MODEL = "gpt-5.6-terra"
 DEFAULT_ESCALATION_MODEL = "gpt-5.6-sol"
+DEFAULT_RESEARCH_PLANNING_MODEL = "gpt-5.6-terra"
+DEFAULT_OFFICIAL_EXTRACTION_MODEL = "gpt-5.6-terra"
 DEFAULT_MAX_RETRIES = 2
 
 
@@ -50,6 +52,10 @@ class LLMSettings(MawhibaModel):
     extraction_model: str = Field(default=DEFAULT_EXTRACTION_MODEL, min_length=1)
     classification_model: str = Field(default=DEFAULT_CLASSIFICATION_MODEL, min_length=1)
     escalation_model: str = Field(default=DEFAULT_ESCALATION_MODEL, min_length=1)
+    research_planning_model: str = Field(default=DEFAULT_RESEARCH_PLANNING_MODEL, min_length=1)
+    official_extraction_model: str = Field(
+        default=DEFAULT_OFFICIAL_EXTRACTION_MODEL, min_length=1
+    )
 
     max_retries: int = Field(
         default=DEFAULT_MAX_RETRIES,

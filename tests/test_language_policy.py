@@ -63,6 +63,11 @@ ARABIC_AS_DATA: dict[Path, str] = {
     / "intake"
     / "v1"
     / "cases.jsonl": "synthetic Arabic Gold submissions and expected values",
+    PROJECT_ROOT
+    / "evals"
+    / "research_planning"
+    / "v1"
+    / "cases.jsonl": "synthetic Arabic project values, source terms and synthetic names",
 }
 
 FILES_ALLOWED_TO_QUOTE_ARABIC = set(ARABIC_AS_DATA)

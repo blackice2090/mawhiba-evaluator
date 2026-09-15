@@ -31,9 +31,13 @@ Python 3.12+ is required. A local venv is at `.venv`.
 # Intake trust evaluation (deterministic, fake provider)
 ./.venv/Scripts/python.exe -m src.evals.cli
 
+# Research planning eval (deterministic, fake provider)
+./.venv/Scripts/python.exe -m src.evals.research.cli
+
 # Live evals / live integration tests -- NEVER run these without being asked
 RUN_OPENAI_INTAKE_EVALS=1 ./.venv/Scripts/python.exe -m src.evals.cli --live
 RUN_OPENAI_INTEGRATION_TESTS=1 ./.venv/Scripts/python.exe -m pytest tests/test_openai_integration.py
+RUN_OFFICIAL_WEB_TESTS=1 ./.venv/Scripts/python.exe -m pytest tests/test_official_web_integration.py
 ```
 
 No linter or type checker is configured. Do not add one without being asked.
@@ -180,14 +184,19 @@ not obvious from the code.
 - `docs/phase1a_workflow.md` — graph, checkpointing, interrupt/resume, idempotency
 - `docs/phase1b_trusted_intake.md` — provider abstraction, provenance, evaluation boundary
 - `docs/phase1c_intake_evals.md` — canonical intake model, taxonomy, Gold evals
-- `docs/adr/ADR-00{1..5}-*.md` — decisions and their rejected alternatives
+- `docs/phase2a_research_foundation.md` — research runs, query provenance, official requirements
+- `docs/adr/ADR-00{1..7}-*.md` — decisions and their rejected alternatives
 
 ## Phase discipline
 
-Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C). The research layer
-(academic, patent, web, GitHub connectors), scoring engine, Red Team, report
-generation, PostgreSQL checkpointer and UI are **not implemented**. Do not start
-them without being asked.
+Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A). Phase 2A added
+the research foundation: `ResearchRun` on graph state (never in `ProjectState`),
+verified query planning, and official Mawhiba requirements retrieval
+(`build_phase2a_research_graph()`). Research planning must never write
+`ProjectState`, and retrieval produces `SourceCandidate`, never `EvidenceRecord`
+(ADR-006, ADR-007). The academic, patent, product, open-source and standards
+connectors (Phase 2B), scoring engine, Red Team, report generation, PostgreSQL
+checkpointer and UI are **not implemented**. Do not start them without being asked.
 
 When a prior guarantee blocks new work, the answer is almost never to relax the
 guarantee — the guards in `test_workflow_hardening.py` and

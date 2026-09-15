@@ -30,6 +30,7 @@ from src.schemas.extraction import (
     VerifiedClassification,
     VerifiedExtraction,
 )
+from src.schemas.research import CandidateQueryPlan, ResearchRun
 from src.schemas.submission import StudentSubmissionArtifact
 from src.workflow.errors import WorkflowError
 
@@ -110,6 +111,23 @@ def merge_unique_errors(
     return merged
 
 
+def merge_research_runs(
+    left: dict[str, ResearchRun], right: dict[str, ResearchRun]
+) -> dict[str, ResearchRun]:
+    """Merge research runs by id. A terminal run is never replaced.
+
+    An in-progress run is superseded by its own later version (replay-safe); a
+    finished run is frozen, so no later update can rewrite an older run.
+    """
+    merged = dict(left)
+    for key, run in right.items():
+        existing = merged.get(key)
+        if existing is not None and existing.is_terminal:
+            continue
+        merged[key] = run
+    return merged
+
+
 def merge_unique_events(
     left: list[AuditEvent], right: list[AuditEvent]
 ) -> list[AuditEvent]:
@@ -185,6 +203,18 @@ class EvaluationGraphState(MawhibaModel):
         description="Anchor-verified project type and technical domains.",
     )
 
+    # -- Phase 2A research channels -------------------------------------------
+    research_runs: Annotated[dict[str, ResearchRun], merge_research_runs] = Field(
+        default_factory=dict,
+        description="Research runs keyed by research_run_id. Kept outside ProjectState "
+        "so research planning can never write project facts (ADR-006).",
+    )
+    active_research_run_id: UUID | None = None
+    candidate_query_plan: CandidateQueryPlan | None = Field(
+        default=None,
+        description="Raw planner output. UNTRUSTED -- only VERIFY_QUERY_PLAN reads it.",
+    )
+
     interrupt_request: InterruptRequest | None = None
     pending_input: dict[str, Any] | None = Field(
         default=None,
@@ -225,6 +255,12 @@ class EvaluationGraphState(MawhibaModel):
 
     def record_for(self, node: str) -> NodeExecutionRecord | None:
         return self.node_results.get(node)
+
+    @property
+    def active_research_run(self) -> ResearchRun | None:
+        if self.active_research_run_id is None:
+            return None
+        return self.research_runs.get(str(self.active_research_run_id))
 
     @property
     def is_terminal(self) -> bool:

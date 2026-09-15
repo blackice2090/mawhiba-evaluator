@@ -327,13 +327,26 @@ class OperatingMode(StrEnum):
 
 
 class ResearchBranch(StrEnum):
-    """Section 9 parallel research branches, plus the official-requirements branch (N03)."""
+    """Section 9 parallel research branches, plus the official-requirements branch (N03).
 
+    Phase 2A renamed ``OFFICIAL`` to ``OFFICIAL_REQUIREMENTS`` and added
+    ``STANDARDS``. ``OFFICIAL`` remains an alias of the same member, and the
+    legacy serialized value is migrated by ``_missing_`` so old snapshots load.
+    """
+
+    OFFICIAL_REQUIREMENTS = "OFFICIAL_REQUIREMENTS"
     ACADEMIC = "ACADEMIC"
     PATENT = "PATENT"
     PRODUCT = "PRODUCT"
     OPEN_SOURCE = "OPEN_SOURCE"
-    OFFICIAL = "OFFICIAL"
+    STANDARDS = "STANDARDS"
+    OFFICIAL = "OFFICIAL_REQUIREMENTS"
+
+    @classmethod
+    def _missing_(cls, value: object) -> ResearchBranch | None:
+        if value == "OFFICIAL":
+            return cls.OFFICIAL_REQUIREMENTS
+        return None
 
 
 class BranchStatus(StrEnum):

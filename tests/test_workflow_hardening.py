@@ -483,6 +483,28 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "EvalBaseline",
         "RunProvenance",
         "GateResult",
+        # Phase 2A research configuration: per-process policy, never checkpointed.
+        "ResearchSettings",
+        "OfficialRequirementsSettings",
+        # Phase 2A provider-facing DTOs: a web retrieval result is consumed inside
+        # OFFICIAL_REQUIREMENTS_RETRIEVAL and persisted as a SourceCandidate; the
+        # raw official extraction is consumed inside EXTRACT_OFFICIAL_REQUIREMENTS
+        # and only its verified form is persisted.
+        "OfficialRetrievalResult",
+        "OfficialRequirementsExtraction",
+        "CandidateOfficialRequirement",
+        # Phase 2A research planning eval layer: offline measurement artifacts
+        # that run outside the graph and never touch a checkpoint.
+        "GoldClaim",
+        "GoldPrivacy",
+        "GoldProject",
+        "ResearchGoldCase",
+        "ResearchGoldDataset",
+        "ResearchGoldExpectation",
+        "ResearchPlanningMetrics",
+        # Student identity context for PII minimization. Deliberately never placed
+        # on graph state, so personal data can never reach a checkpoint.
+        "PiiKind",
     }
 )
 """Types that legitimately never cross the checkpoint boundary.
