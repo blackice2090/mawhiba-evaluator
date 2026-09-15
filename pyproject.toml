@@ -1,0 +1,33 @@
+[project]
+name = "mawhiba-evaluator"
+version = "0.1.0"
+description = "Mawhiba Project Evaluator Agent - evidence-driven evaluation workflow"
+requires-python = ">=3.12"
+dependencies = [
+    "pydantic>=2.7",
+    # Workflow owner: state machine, checkpointing, interrupt/resume, routing.
+    # Resolved to 1.2.11 during Phase 1A; the floor is the 1.x API this code
+    # targets (langgraph.types.interrupt / Command, StateGraph, InMemorySaver).
+    "langgraph>=1.2,<2.0",
+    # Structured Outputs via the Responses API (client.responses.parse).
+    # Resolved to 3.13.0 during Phase 1B. No API key is needed to import the
+    # package or to run the unit suite.
+    "openai>=2.0,<4.0",
+]
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+]
+
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools.packages.find]
+include = ["src*"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = "-q"

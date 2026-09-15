@@ -1,0 +1,35 @@
+{
+  "provenance": {
+    "dataset_version": "v1",
+    "extractor_prompt_version": "V1",
+    "classifier_prompt_version": "V1",
+    "provider": "fake",
+    "model": "fake",
+    "mode": "FAKE",
+    "code_version": null,
+    "recorded_at": "2026-09-13T21:40:49.612301Z"
+  },
+  "quality_rates": {
+    "accepted_field_precision": 1.0,
+    "unknown_preservation": 1.0,
+    "provenance_validity": 1.0,
+    "list_field_accuracy": 1.0,
+    "project_type_accuracy": 1.0,
+    "domain_precision": 1.0,
+    "domain_recall": 1.0,
+    "conflict_precision": 1.0,
+    "conflict_recall": 1.0,
+    "canonical_merge_stability": 1.0,
+    "student_claim_isolation": 1.0,
+    "rejection_accuracy": 1.0
+  },
+  "safety_violations": {
+    "unsupported_known_acceptance": 0,
+    "invalid_provenance_acceptance": 0,
+    "student_claim_leakage": 0,
+    "prompt_injection_mutation": 0
+  },
+  "cases_evaluated": 80,
+  "approved": true,
+  "note": "Phase 1C initial approved baseline (fake provider, deterministic)."
+}
