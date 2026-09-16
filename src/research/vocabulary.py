@@ -1,10 +1,18 @@
 """Closed vocabularies used by deterministic query verification.
 
-Kept dependency-free so both the prompts and the verifier import one source.
+Two reviewed, language-specific lists: English below, Arabic in
+``data/search_vocabulary_ar.json``. Arabic lives in a data file because the
+developer layer is English-only (language policy); the file is small, reviewed and
+diffable, which is the point -- an uncontrolled stopword list would let arbitrary
+words into queries without provenance.
+
 Changing a list is a reviewable policy change, like a trust threshold.
 """
 
 from __future__ import annotations
+
+import json
+from pathlib import Path
 
 QUERY_CONNECTOR_TOKENS: frozenset[str] = frozenset(
     {
@@ -25,11 +33,7 @@ QUERY_CONNECTOR_TOKENS: frozenset[str] = frozenset(
         "specification", "specifications",
     }
 )
-"""Words a query may contain without a source-term or expansion-term origin.
-
-Every other token in an accepted query must come from a declared source term
-(traced to ProjectState) or a declared expansion term (explicitly not a fact).
-"""
+"""English words a query may contain without a source-term or expansion-term origin."""
 
 CONFIRMATION_BIAS_MARKERS: tuple[str, ...] = (
     "advantages of",
@@ -42,7 +46,7 @@ CONFIRMATION_BIAS_MARKERS: tuple[str, ...] = (
     "better than",
     "success of",
 )
-"""Advocacy phrasing. The research system tests the project; it does not defend it."""
+"""English advocacy phrasing. The research system tests the project; it does not defend it."""
 
 INJECTION_MARKERS: tuple[str, ...] = (
     "ignore your",
@@ -58,5 +62,25 @@ INJECTION_MARKERS: tuple[str, ...] = (
     "give a score",
     "score of 100",
 )
-"""Instruction-like text. Treated as content, and never allowed through as a query
-or as an official requirement."""
+"""English instruction-like text. Treated as content, never allowed through as a
+query or as an official requirement."""
+
+ARABIC_VOCABULARY_PATH = Path(__file__).resolve().parent / "data" / "search_vocabulary_ar.json"
+
+_ARABIC = json.loads(ARABIC_VOCABULARY_PATH.read_text(encoding="utf-8"))
+
+ARABIC_VOCABULARY_VERSION: str = _ARABIC["version"]
+ARABIC_QUERY_CONNECTOR_TOKENS: frozenset[str] = frozenset(_ARABIC["connector_tokens"])
+ARABIC_CONFIRMATION_BIAS_MARKERS: tuple[str, ...] = tuple(_ARABIC["confirmation_bias_markers"])
+ARABIC_INJECTION_MARKERS: tuple[str, ...] = tuple(_ARABIC["injection_markers"])
+
+ALL_QUERY_CONNECTOR_TOKENS: frozenset[str] = QUERY_CONNECTOR_TOKENS | ARABIC_QUERY_CONNECTOR_TOKENS
+ALL_CONFIRMATION_BIAS_MARKERS: tuple[str, ...] = (
+    *CONFIRMATION_BIAS_MARKERS,
+    *ARABIC_CONFIRMATION_BIAS_MARKERS,
+)
+ALL_INJECTION_MARKERS: tuple[str, ...] = (*INJECTION_MARKERS, *ARABIC_INJECTION_MARKERS)
+
+MAX_REVIEWED_CONNECTOR_TOKENS = 80
+"""Per language. A vocabulary that grows past a reviewable size stops being a
+reviewed list and becomes an unbounded allowance."""

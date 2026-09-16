@@ -13,8 +13,8 @@ from uuid import UUID
 
 from src.config.settings import LLMSettings
 from src.graph.state import ProjectState
-from src.intake.extractor import _call_with_retries
 from src.llm.contracts import ModelCallResult, ModelTask
+from src.llm.invocation import call_structured_model_with_retries
 from src.llm.prompts import (
     PROMPT_VERSIONS,
     RESEARCH_INPUT_MARKER,
@@ -61,7 +61,7 @@ def run_query_planning(
     settings: LLMSettings,
     limits: QueryPlanLimits,
 ) -> ModelCallResult[CandidateQueryPlan]:
-    return _call_with_retries(
+    return call_structured_model_with_retries(
         provider,
         task=ModelTask.RESEARCH_QUERY_PLANNING,
         system_prompt=RESEARCH_QUERY_PLANNER_PROMPT_V1,

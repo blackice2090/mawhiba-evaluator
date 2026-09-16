@@ -4,6 +4,9 @@ Model output from an official page is an untrusted candidate. A requirement is
 accepted only when its excerpt verifies inside the snapshot text; its canonical
 statement is that excerpt. A weight survives only when its exact text is inside
 the verified statement -- otherwise ``official_weight`` stays ``None``.
+
+A requirement inherits its snapshot's currency: an anchor-verified rule from a
+past edition is HISTORICAL, kept and never applied.
 """
 
 from __future__ import annotations
@@ -12,16 +15,17 @@ import re
 
 from src.config.settings import LLMSettings
 from src.intake.anchors import collapse_whitespace, normalize_unicode, verify_anchor
-from src.intake.extractor import _call_with_retries
 from src.llm.contracts import ModelCallResult, ModelTask
+from src.llm.invocation import call_structured_model_with_retries
 from src.llm.prompts import (
     OFFICIAL_PAGE_MARKER,
     OFFICIAL_REQUIREMENTS_EXTRACTOR_PROMPT_V1,
     PROMPT_VERSIONS,
 )
 from src.llm.provider import StructuredModelProvider
-from src.research.vocabulary import INJECTION_MARKERS
+from src.research.vocabulary import ALL_INJECTION_MARKERS
 from src.schemas.official import (
+    CURRENCY_TO_REQUIREMENT_STATUS,
     WEIGHT_BEARING_CATEGORIES,
     ConflictResolutionBasis,
     ConflictSide,
@@ -58,7 +62,7 @@ def run_official_extraction(
     provider: StructuredModelProvider,
     settings: LLMSettings,
 ) -> ModelCallResult[OfficialRequirementsExtraction]:
-    return _call_with_retries(
+    return call_structured_model_with_retries(
         provider,
         task=ModelTask.OFFICIAL_REQUIREMENTS_EXTRACTION,
         system_prompt=OFFICIAL_REQUIREMENTS_EXTRACTOR_PROMPT_V1,
@@ -74,8 +78,9 @@ def _fold(text: str) -> str:
 
 
 def looks_like_injection(text: str) -> bool:
+    """Instruction-like text in either language. Page content is data, never a command."""
     folded = f" {_fold(text)} "
-    return any(f" {marker}" in folded for marker in INJECTION_MARKERS)
+    return any(f" {marker}" in folded for marker in ALL_INJECTION_MARKERS)
 
 
 def _parse_weight(text: str) -> float | None:
@@ -88,6 +93,7 @@ def verify_official_requirements(
 ) -> tuple[list[OfficialRequirement], list[RejectedOfficialRequirement]]:
     accepted: list[OfficialRequirement] = []
     rejected: list[RejectedOfficialRequirement] = []
+    status = CURRENCY_TO_REQUIREMENT_STATUS[snapshot.currency]
 
     for candidate in extraction.requirements:
         def reject(reason: RequirementRejectionReason) -> None:
@@ -143,12 +149,6 @@ def verify_official_requirements(
         if date_text and date_text.casefold() not in statement.casefold():
             date_text = None
 
-        dated = snapshot.date_indicator
-        status = (
-            OfficialRequirementStatus.VERIFIED_CURRENT
-            if dated is not None and dated <= snapshot.retrieved_at
-            else OfficialRequirementStatus.VERIFIED_BUT_DATE_UNKNOWN
-        )
         accepted.append(
             OfficialRequirement(
                 source_id=snapshot.source_id,
@@ -163,6 +163,7 @@ def verify_official_requirements(
                 official_weight_text=weight_text,
                 weight_rejection=weight_rejection,
                 stated_date_text=date_text,
+                competition_edition=snapshot.competition_edition,
                 status=status,
                 retrieved_at=snapshot.retrieved_at,
             )
@@ -171,15 +172,14 @@ def verify_official_requirements(
     return accepted, rejected
 
 
-def _newest(sides: list[tuple[OfficialRequirement, object]]) -> OfficialRequirement | None:
-    """The single requirement with the strictly newest date, or None."""
-    dates = [date for _, date in sides]
-    if any(date is None for date in dates):
+def _single_newest(sides: list[tuple[OfficialRequirement, object]]) -> OfficialRequirement | None:
+    """The one requirement whose source is strictly newest, or None."""
+    values = [value for _, value in sides]
+    if any(value is None for value in values):
         return None
-    newest = max(dates)
-    winners = [req for req, date in sides if date == newest]
-    source_ids = {req.source_id for req in winners}
-    return winners[0] if len(source_ids) == 1 else None
+    newest = max(values)
+    winners = [req for req, value in sides if value == newest]
+    return winners[0] if len({req.source_id for req in winners}) == 1 else None
 
 
 def detect_official_conflicts(
@@ -188,9 +188,10 @@ def detect_official_conflicts(
     """Preserve disagreements between official sources.
 
     Items conflict when they share a category and subject, come from different
-    sources, and state different text or weights. The newer source is preferred
-    only when explicit dates on every side establish it; otherwise the conflict
-    stays unresolved and every side is marked CONFLICTED.
+    sources, and state different text or weights. Resolution is explicit and
+    ordered: a newer competition edition, then a newer effective date, then a newer
+    publication date. Otherwise the conflict stays unresolved and every side is
+    marked CONFLICTED. Nothing is discarded.
     """
     by_source = {s.source_id: s for s in snapshots}
     groups: dict[tuple[OfficialRequirementCategory, str], list[OfficialRequirement]] = {}
@@ -206,16 +207,21 @@ def detect_official_conflicts(
         if len({(_fold(r.statement), r.official_weight) for r in items}) < 2:
             continue
 
-        effective = _newest([(r, by_source[r.source_id].effective_at) for r in items])
-        published = _newest([(r, by_source[r.source_id].published_at) for r in items])
-        if effective is not None:
-            basis, preferred = ConflictResolutionBasis.NEWER_EFFECTIVE_DATE, effective
-        elif published is not None:
-            basis, preferred = ConflictResolutionBasis.NEWER_PUBLICATION_DATE, published
+        by_edition = _single_newest([(r, r.competition_edition) for r in items])
+        by_effective = _single_newest([(r, by_source[r.source_id].effective_at) for r in items])
+        by_published = _single_newest([(r, by_source[r.source_id].published_at) for r in items])
+        if by_edition is not None:
+            basis, preferred = ConflictResolutionBasis.NEWER_COMPETITION_EDITION, by_edition
+        elif by_effective is not None:
+            basis, preferred = ConflictResolutionBasis.NEWER_EFFECTIVE_DATE, by_effective
+        elif by_published is not None:
+            basis, preferred = ConflictResolutionBasis.NEWER_PUBLICATION_DATE, by_published
         else:
             basis, preferred = ConflictResolutionBasis.UNRESOLVED, None
 
         for item in items:
+            if item.status is OfficialRequirementStatus.HISTORICAL:
+                continue  # already known to belong to a past edition
             if preferred is None:
                 new_status[item.requirement_id] = OfficialRequirementStatus.CONFLICTED
             elif item.source_id != preferred.source_id:
@@ -231,6 +237,7 @@ def detect_official_conflicts(
                         source_id=r.source_id,
                         statement=r.statement,
                         official_weight=r.official_weight,
+                        competition_edition=r.competition_edition,
                         effective_at=by_source[r.source_id].effective_at,
                         published_at=by_source[r.source_id].published_at,
                     )

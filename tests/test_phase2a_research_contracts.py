@@ -1,4 +1,4 @@
-"""Phase 2A research and official-requirements contracts."""
+"""Phase 2A research and official-requirements contracts, hardened in Phase 2A.1."""
 
 from __future__ import annotations
 
@@ -12,18 +12,32 @@ from pydantic import BaseModel, ValidationError
 from src.graph.state import ProjectState
 from src.graph.type_discovery import discover_types_from
 from src.graph.workflow_state import EvaluationGraphState, merge_research_runs
-from src.schemas.common import EvaluationStatus, ResearchBranch
+from src.schemas.common import (
+    CANONICAL_SOURCE_ID_PATTERN,
+    LEGACY_SOURCE_ID_PATTERN,
+    EvaluationStatus,
+    ResearchBranch,
+    is_canonical_source_id,
+    new_source_id,
+)
+from src.schemas.evidence import EvidenceRecord, EvidenceType
 from src.schemas.extraction import AnchorVerificationMethod, TextRange, VerifiedAnchor
 from src.schemas.official import (
+    APPLICABLE_REQUIREMENT_STATUSES,
+    CURRENCY_TO_REQUIREMENT_STATUS,
     ConflictResolutionBasis,
     ConflictSide,
     CriteriaAuthority,
+    EditionSource,
+    OfficialCurrency,
+    OfficialPageKind,
     OfficialRequirement,
     OfficialRequirementCategory,
     OfficialRequirementConflict,
     OfficialRequirementsOutcome,
     OfficialRequirementsResult,
     OfficialRequirementStatus,
+    OfficialSeed,
     OfficialSourceSnapshot,
     RetrievalStatus,
     SourceCandidate,
@@ -42,10 +56,19 @@ from src.schemas.research import (
     ResearchRunVersions,
     SourceTerm,
 )
-from src.schemas.source import SourceType, SourceTier, VerificationStatus
+from src.schemas.source import (
+    SourceFingerprint,
+    SourceIdentifierKind,
+    SourceRecord,
+    SourceTier,
+    SourceType,
+    VerificationStatus,
+)
 
 HASH = "a" * 64
+OTHER_HASH = "b" * 64
 NOW = datetime(2026, 9, 1, tzinfo=timezone.utc)
+URL = "https://mawhiba2.mawhiba.sa/services/rules"
 
 
 def _run(**changes) -> ResearchRun:
@@ -65,12 +88,22 @@ def _anchor(excerpt: str) -> VerifiedAnchor:
     )
 
 
+def _snapshot(**changes) -> OfficialSourceSnapshot:
+    base = dict(
+        source_id=new_source_id(), display_id="SRC-001", candidate_id=uuid4(), url=URL,
+        canonical_url=URL, domain="mawhiba2.mawhiba.sa", retrieved_at=NOW, content_hash=HASH,
+        fingerprint=SourceFingerprint.for_url(URL, HASH), captured_text="Rules",
+    )
+    base.update(changes)
+    return OfficialSourceSnapshot(**base)
+
+
 def _requirement(**changes) -> OfficialRequirement:
     base = dict(
-        source_id="SRC-001", snapshot_id=uuid4(), content_hash=HASH,
+        source_id=new_source_id(), snapshot_id=uuid4(), content_hash=HASH,
         category=OfficialRequirementCategory.JUDGING_CRITERIA, subject="innovation",
         statement="Innovation 30%", anchor=_anchor("Innovation 30%"),
-        status=OfficialRequirementStatus.VERIFIED_BUT_DATE_UNKNOWN, retrieved_at=NOW,
+        status=OfficialRequirementStatus.VERIFIED_CURRENCY_UNKNOWN, retrieved_at=NOW,
     )
     base.update(changes)
     return OfficialRequirement(**base)
@@ -117,11 +150,160 @@ def test_query_purpose_taxonomy_covers_the_required_families() -> None:
     "enum_cls",
     [ResearchBranch, ResearchRunStatus, QueryPurpose, QueryStatus, QueryRejectionReason,
      OfficialRequirementCategory, OfficialRequirementStatus, OfficialRequirementsOutcome,
-     RetrievalStatus, CriteriaAuthority, ConflictResolutionBasis],
+     RetrievalStatus, CriteriaAuthority, ConflictResolutionBasis, OfficialPageKind,
+     OfficialCurrency, EditionSource, SourceIdentifierKind],
 )
 def test_phase2a_enum_values_are_ascii_upper_snake_case(enum_cls) -> None:
     for member in enum_cls:
         assert re.fullmatch(r"[A-Z][A-Z0-9_]*", member.value), f"{enum_cls.__name__}.{member.name}"
+
+
+# --- global source identity (Phase 2A.1) -------------------------------------------
+
+
+def test_minted_source_ids_are_canonical_and_unique() -> None:
+    ids = {new_source_id() for _ in range(1000)}
+    assert len(ids) == 1000
+    assert all(is_canonical_source_id(value) for value in ids)
+    assert all(re.fullmatch(CANONICAL_SOURCE_ID_PATTERN, value) for value in ids)
+
+
+def test_two_independent_runs_cannot_collide_on_a_source_id() -> None:
+    """The Phase 2A sequence form collided across runs; the canonical form cannot."""
+    first, second = _snapshot(), _snapshot()
+    assert first.source_id != second.source_id
+    assert first.display_id == second.display_id == "SRC-001"
+
+
+def test_a_display_id_is_never_identity() -> None:
+    record = SourceRecord(source_id=new_source_id(), display_id="SRC-001",
+                          source_type=SourceType.ACADEMIC_PAPER)
+    assert record.display_id != record.source_id
+    assert re.fullmatch(LEGACY_SOURCE_ID_PATTERN, record.display_id)
+    with pytest.raises(ValidationError):
+        SourceRecord(source_id=new_source_id(), display_id=new_source_id(),
+                     source_type=SourceType.ACADEMIC_PAPER)
+
+
+def test_legacy_sequence_ids_still_load_for_existing_data() -> None:
+    record = SourceRecord(source_id="SRC-001", source_type=SourceType.ACADEMIC_PAPER)
+    assert record.source_id == "SRC-001" and not is_canonical_source_id(record.source_id)
+    EvidenceRecord(evidence_id="E-001", source_id="SRC-001",
+                   evidence_type=EvidenceType.OFFICIAL_RULE, statement="x")
+    EvidenceRecord(evidence_id="E-002", source_id=record.source_id,
+                   evidence_type=EvidenceType.OFFICIAL_RULE, statement="x")
+
+
+def test_new_official_contracts_accept_only_canonical_ids() -> None:
+    with pytest.raises(ValidationError):
+        _snapshot(source_id="SRC-001")
+    with pytest.raises(ValidationError):
+        _requirement(source_id="SRC-001")
+
+
+@pytest.mark.parametrize("bad", ["SRC-1", "src-001", "SRC-", "SRC-zzzz", "001"])
+def test_malformed_source_ids_are_rejected(bad: str) -> None:
+    with pytest.raises(ValidationError):
+        SourceRecord(source_id=bad, source_type=SourceType.ACADEMIC_PAPER)
+
+
+# --- source fingerprinting ------------------------------------------------------------
+
+
+def test_fingerprint_separates_logical_source_from_content_version() -> None:
+    first = SourceFingerprint.for_url(URL, HASH)
+    same = SourceFingerprint.for_url(URL, HASH)
+    changed = SourceFingerprint.for_url(URL, OTHER_HASH)
+    other = SourceFingerprint.for_url("https://mawhiba.sa/other", HASH)
+
+    assert first.same_content_version(same)
+    assert first.same_logical_source(changed) and not first.same_content_version(changed)
+    assert not first.same_logical_source(other)
+    assert first.version_key != changed.version_key
+    assert first.logical_key == changed.logical_key
+
+
+def test_an_unhashed_capture_is_never_the_same_version() -> None:
+    unhashed = SourceFingerprint.for_url(URL)
+    assert unhashed.same_logical_source(SourceFingerprint.for_url(URL, HASH))
+    assert not unhashed.same_content_version(SourceFingerprint.for_url(URL))
+
+
+def test_fingerprints_normalize_their_identifier() -> None:
+    assert SourceFingerprint.for_url("https://MAWHIBA2.mawhiba.sa/x#top").identifier == (
+        "https://mawhiba2.mawhiba.sa/x"
+    )
+    doi = SourceFingerprint.create(SourceIdentifierKind.DOI, "https://doi.org/10.1000/AbC")
+    assert doi.identifier == "10.1000/abc"
+    with pytest.raises(ValidationError):
+        SourceFingerprint(identifier_kind=SourceIdentifierKind.DOI, identifier="10.1000/AbC")
+
+
+def test_later_branches_have_identifier_kinds_and_title_is_not_one() -> None:
+    kinds = {k.value for k in SourceIdentifierKind}
+    assert {"DOI", "OPENALEX_ID", "SEMANTIC_SCHOLAR_ID", "PMID", "CANONICAL_URL"} <= kinds
+    assert not any("TITLE" in kind for kind in kinds)
+
+
+def test_a_record_cannot_disagree_with_its_own_fingerprint() -> None:
+    with pytest.raises(ValidationError, match="fingerprint content_hash"):
+        SourceRecord(source_id=new_source_id(), source_type=SourceType.ACADEMIC_PAPER,
+                     content_hash=HASH, fingerprint=SourceFingerprint.for_url(URL, OTHER_HASH))
+
+
+# --- official seeds and currency ------------------------------------------------------
+
+
+def test_event_pages_declare_an_edition_and_evergreen_pages_do_not() -> None:
+    OfficialSeed(url=URL, kind=OfficialPageKind.CURRENT_EVENT_PAGE, competition_edition=2026)
+    OfficialSeed(url=URL, kind=OfficialPageKind.EVERGREEN_SERVICE_PAGE)
+    with pytest.raises(ValidationError, match="competition_edition"):
+        OfficialSeed(url=URL, kind=OfficialPageKind.CURRENT_EVENT_PAGE)
+    with pytest.raises(ValidationError, match="must not declare"):
+        OfficialSeed(url=URL, kind=OfficialPageKind.EVERGREEN_SERVICE_PAGE, competition_edition=2026)
+
+
+def test_currency_maps_to_requirement_status() -> None:
+    assert CURRENCY_TO_REQUIREMENT_STATUS == {
+        OfficialCurrency.CURRENT_EDITION: OfficialRequirementStatus.VERIFIED_CURRENT,
+        OfficialCurrency.EVERGREEN: OfficialRequirementStatus.VERIFIED_EVERGREEN,
+        OfficialCurrency.HISTORICAL_EDITION: OfficialRequirementStatus.HISTORICAL,
+        OfficialCurrency.UNDETERMINED: OfficialRequirementStatus.VERIFIED_CURRENCY_UNKNOWN,
+    }
+    assert APPLICABLE_REQUIREMENT_STATUSES == {
+        OfficialRequirementStatus.VERIFIED_CURRENT, OfficialRequirementStatus.VERIFIED_EVERGREEN
+    }
+    assert not _requirement(status=OfficialRequirementStatus.HISTORICAL).is_applicable
+    assert _requirement(status=OfficialRequirementStatus.VERIFIED_EVERGREEN).is_applicable
+
+
+def test_an_edition_must_say_where_it_came_from() -> None:
+    with pytest.raises(ValidationError, match="where it came from"):
+        _snapshot(competition_edition=2025, edition_source=EditionSource.NONE)
+    with pytest.raises(ValidationError, match="where it came from"):
+        _snapshot(edition_source=EditionSource.SEED_DECLARATION)
+
+
+def test_current_edition_requires_a_known_edition() -> None:
+    with pytest.raises(ValidationError, match="CURRENT_EDITION requires"):
+        _snapshot(currency=OfficialCurrency.CURRENT_EDITION)
+    _snapshot(currency=OfficialCurrency.CURRENT_EDITION, competition_edition=2026,
+              edition_source=EditionSource.SEED_DECLARATION)
+
+
+def test_only_applicable_requirements_are_offered_for_use() -> None:
+    snapshot = _snapshot()
+    historical = _requirement(source_id=snapshot.source_id,
+                              status=OfficialRequirementStatus.HISTORICAL)
+    evergreen = _requirement(source_id=snapshot.source_id,
+                             status=OfficialRequirementStatus.VERIFIED_EVERGREEN)
+    result = OfficialRequirementsResult(
+        outcome=OfficialRequirementsOutcome.OFFICIAL_REQUIREMENTS_VERIFIED,
+        snapshots=[snapshot], verified_sources=[snapshot.to_source_record()],
+        requirements=[historical, evergreen],
+    )
+    assert result.applicable_requirements == [evergreen]
+    assert len(result.requirements) == 2  # the historical rule is preserved
 
 
 # --- ResearchRun ---------------------------------------------------------------
@@ -273,20 +455,12 @@ def test_accepted_requirement_cannot_be_unverified() -> None:
 
 def test_source_candidate_success_requires_content_and_hash() -> None:
     with pytest.raises(ValidationError):
-        SourceCandidate(research_run_id=uuid4(), requested_url="https://www.mawhiba.sa/",
+        SourceCandidate(research_run_id=uuid4(), requested_url=URL,
                         retrieval_status=RetrievalStatus.SUCCESS, retrieved_at=NOW, provider="p")
     with pytest.raises(ValidationError):
-        SourceCandidate(research_run_id=uuid4(), requested_url="https://www.mawhiba.sa/",
+        SourceCandidate(research_run_id=uuid4(), requested_url=URL,
                         retrieval_status=RetrievalStatus.TIMEOUT, captured_text="x",
                         retrieved_at=NOW, provider="p")
-
-
-def _snapshot(**changes) -> OfficialSourceSnapshot:
-    base = dict(source_id="SRC-001", candidate_id=uuid4(), url="https://www.mawhiba.sa/x",
-                canonical_url="https://www.mawhiba.sa/x", domain="www.mawhiba.sa",
-                retrieved_at=NOW, content_hash=HASH, captured_text="Rules")
-    base.update(changes)
-    return OfficialSourceSnapshot(**base)
 
 
 def test_snapshot_exists_only_when_verified() -> None:
@@ -294,11 +468,21 @@ def test_snapshot_exists_only_when_verified() -> None:
         _snapshot(verification_status=VerificationStatus.SEARCH_RESULT_ONLY)
 
 
+def test_snapshot_fingerprint_must_match_its_own_url_and_hash() -> None:
+    with pytest.raises(ValidationError, match="canonical URL"):
+        _snapshot(fingerprint=SourceFingerprint.for_url("https://mawhiba.sa/other", HASH))
+    with pytest.raises(ValidationError, match="content_hash"):
+        _snapshot(fingerprint=SourceFingerprint.for_url(URL, OTHER_HASH))
+
+
 def test_snapshot_builds_an_official_tier_a_source_record_not_evidence() -> None:
-    record = _snapshot().to_source_record()
+    snapshot = _snapshot()
+    record = snapshot.to_source_record()
     assert record.source_type is SourceType.OFFICIAL_COMPETITION_SOURCE
     assert record.tier is SourceTier.TIER_A
     assert record.content_hash == HASH
+    assert record.source_id == snapshot.source_id and record.display_id == snapshot.display_id
+    assert record.fingerprint == snapshot.fingerprint
     assert record.version_or_publication_date is None
     assert record.branch is ResearchBranch.OFFICIAL_REQUIREMENTS
 
@@ -329,8 +513,9 @@ def test_only_a_verified_outcome_counts_as_checked() -> None:
 
 def test_conflict_preserves_both_sides_and_explicit_resolution() -> None:
     a, b = uuid4(), uuid4()
-    sides = [ConflictSide(requirement_id=a, source_id="SRC-001", statement="x"),
-             ConflictSide(requirement_id=b, source_id="SRC-002", statement="y")]
+    first_id, second_id = new_source_id(), new_source_id()
+    sides = [ConflictSide(requirement_id=a, source_id=first_id, statement="x"),
+             ConflictSide(requirement_id=b, source_id=second_id, statement="y")]
     unresolved = OfficialRequirementConflict(category=OfficialRequirementCategory.DEADLINES,
                                              subject="deadline", sides=sides)
     assert unresolved.preferred_requirement_id is None

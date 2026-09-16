@@ -12,11 +12,37 @@ from urllib.parse import urlsplit, urlunsplit
 
 from src.schemas.official import SourceRejectionReason
 
-OFFICIAL_DOMAIN_ALLOWLIST: frozenset[str] = frozenset({"mawhiba.sa", "www.mawhiba.sa"})
+OFFICIAL_DOMAIN_ALLOWLIST: frozenset[str] = frozenset(
+    {"mawhiba.sa", "www.mawhiba.sa", "mawhiba2.mawhiba.sa"}
+)
+"""Exact hosts confirmed to be Mawhiba-controlled.
 
-DEFAULT_OFFICIAL_SEED_URL = "https://www.mawhiba.sa/"
-"""The only seed shipped by default. Specific competition-page URLs must be added
-to configuration after a reviewer confirms them; they are never guessed."""
+``mawhiba2.mawhiba.sa`` serves the current Mawhiba service experience, including
+the National Olympiad for Scientific Creativity service page, so omitting it made
+the system reject a legitimate official source.
+
+There is deliberately no ``*.mawhiba.sa`` rule: a wildcard would admit any
+present or future subdomain, including one that is delegated, parked or
+compromised, on nothing more than a name pattern. A new host joins this set only
+after a reviewer confirms ownership, which is a cheap, auditable step.
+"""
+
+OFFICIAL_ROOT_URL = "https://www.mawhiba.sa/"
+"""Discovery entry point. Not a rules page, and not a default seed."""
+
+OFFICIAL_IBDAA_SERVICE_URL = (
+    "https://mawhiba2.mawhiba.sa/services/"
+    "the-national-olympiad-for-scientific-creativity-ibdaa/"
+)
+"""The National Olympiad for Scientific Creativity service page.
+
+An evergreen service page: it describes the programme rather than one edition's
+event. Edition-specific pages must be configured explicitly, with their edition
+declared, and are never assumed current.
+"""
+
+DEFAULT_OFFICIAL_SEED_URL = OFFICIAL_IBDAA_SERVICE_URL
+"""Backwards-compatible alias for the default seed URL."""
 
 
 def _host(url: str) -> str | None:

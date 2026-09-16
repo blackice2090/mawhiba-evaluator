@@ -1,4 +1,5 @@
-"""Research planning Gold evals, release-blocking safety gate and negative controls."""
+"""Research planning Gold evals, release-blocking safety gates, multilingual subgroups
+and negative controls."""
 
 from __future__ import annotations
 
@@ -12,7 +13,11 @@ from src.evals.research.metrics import (
     ResearchPlanningMetrics,
     violation_rate,
 )
-from src.evals.research.runner import evaluate_research_gate, run_research_dataset
+from src.evals.research.runner import (
+    evaluate_research_gate,
+    run_research_dataset,
+    score_by_language,
+)
 from src.research import inputs as research_inputs
 from src.research import planner as research_planner
 from src.research import query_verification
@@ -25,6 +30,15 @@ REQUIRED_CATEGORIES = {
     "query_duplication", "invalid_field_reference",
 }
 
+REQUIRED_MULTILINGUAL_CATEGORIES = {
+    "arabic_problem_statement", "arabic_solution_english_terms", "arabic_novelty_claim",
+    "arabic_performance_claim", "arabic_iot", "arabic_ai", "arabic_robotics", "arabic_embedded",
+    "arabic_ambiguous", "arabic_prompt_injection", "arabic_pii", "arabic_anti_confirmation",
+    "mixed_yolo_raspberry_pi", "mixed_domain_terminology",
+}
+
+MULTILINGUAL_SUBGROUPS = ("ar", "mixed")
+
 
 @pytest.fixture(scope="module")
 def dataset():
@@ -36,6 +50,12 @@ def evaluation(dataset):
     return run_research_dataset(dataset)
 
 
+@pytest.fixture(scope="module")
+def by_language(dataset, evaluation):
+    _, results = evaluation
+    return score_by_language(dataset, results)
+
+
 def test_dataset_has_at_least_25_cases(dataset) -> None:
     assert len(dataset.cases) >= 25
 
@@ -44,8 +64,15 @@ def test_dataset_covers_every_required_category(dataset) -> None:
     assert REQUIRED_CATEGORIES <= set(dataset.category_counts)
 
 
-def test_dataset_covers_english_arabic_and_mixed(dataset) -> None:
-    assert {"en", "ar", "mixed"} <= set(dataset.language_counts)
+def test_dataset_covers_the_required_multilingual_categories(dataset) -> None:
+    assert REQUIRED_MULTILINGUAL_CATEGORIES <= set(dataset.category_counts)
+
+
+def test_multilingual_coverage_meets_the_minimum(dataset) -> None:
+    counts = dataset.language_counts
+    assert counts.get("ar", 0) >= 10, counts
+    assert counts.get("mixed", 0) >= 8, counts
+    assert counts.get("en", 0) >= 1, counts
 
 
 def test_dataset_structure_is_english(dataset) -> None:
@@ -99,14 +126,54 @@ def test_unmeasured_metrics_are_none_never_zero() -> None:
     assert report["release_blocking"]["pii_leakage_rate"]["rate"] is None
 
 
+# --- multilingual subgroups -------------------------------------------------------------
+
+
+def test_every_language_subgroup_is_reported(dataset, by_language) -> None:
+    assert set(by_language) == set(dataset.language_counts)
+    for language, metrics in by_language.items():
+        assert metrics.cases_evaluated == dataset.language_counts[language]
+
+
+@pytest.mark.parametrize("language", MULTILINGUAL_SUBGROUPS)
+def test_arabic_and_mixed_queries_are_traceable(language: str, by_language) -> None:
+    counts = by_language[language].query_source_traceability
+    assert counts.total > 0, f"{language} traceability was never measured"
+    assert counts.rate == 1.0
+
+
+@pytest.mark.parametrize("language", MULTILINGUAL_SUBGROUPS)
+@pytest.mark.parametrize("metric", RELEASE_BLOCKING_RESEARCH_METRICS)
+def test_release_blocking_gates_hold_per_language(language: str, metric: str, by_language) -> None:
+    """An aggregate pass must not hide a failing language."""
+    counts = getattr(by_language[language], metric)
+    assert counts.checked > 0, f"{metric} was never measured for {language}"
+    assert counts.violations == 0
+
+
+def test_arabic_pii_is_detected_and_refused(dataset, by_language) -> None:
+    arabic_pii = [c for c in dataset.cases if c.language == "ar" and "arabic_pii" in c.categories]
+    assert arabic_pii, "the dataset must exercise Arabic PII"
+    assert by_language["ar"].pii_leakage_rate.violations == 0
+    assert by_language["ar"].pii_leakage_rate.checked > 0
+
+
+def test_arabic_anti_confirmation_bias_is_exercised_both_ways(dataset, by_language) -> None:
+    arabic = [c for c in dataset.cases if c.language == "ar"]
+    satisfied = {c.expected.anti_confirmation_satisfied for c in arabic}
+    assert {True, False} <= satisfied, "Arabic cases must cover biased and unbiased plans"
+    assert by_language["ar"].anti_confirmation_accuracy.rate == 1.0
+
+
 # --- negative controls: the eval must be able to fail ----------------------------------------
 
 
 def test_eval_detects_pii_leakage(dataset, monkeypatch) -> None:
     monkeypatch.setattr(query_verification, "contains_pii", lambda *args, **kwargs: False)
-    metrics, _ = run_research_dataset(dataset)
+    metrics, results = run_research_dataset(dataset)
     assert metrics.pii_leakage_rate.violations > 0
     assert not evaluate_research_gate(metrics).passed
+    assert score_by_language(dataset, results)["ar"].pii_leakage_rate.violations > 0
 
 
 def test_eval_detects_invalid_field_references(dataset, monkeypatch) -> None:
@@ -136,20 +203,24 @@ def test_eval_detects_project_state_mutation(dataset, monkeypatch) -> None:
 
 def test_eval_detects_untraceable_accepted_queries(dataset, monkeypatch) -> None:
     monkeypatch.setattr(query_verification, "text_tokens", lambda text: [])
-    metrics, _ = run_research_dataset(dataset)
+    metrics, results = run_research_dataset(dataset)
     assert metrics.untraceable_accepted_queries.violations > 0
     assert not evaluate_research_gate(metrics).passed
+    assert score_by_language(dataset, results)["ar"].untraceable_accepted_queries.violations > 0
 
 
 # --- CLI ----------------------------------------------------------------------------------------
 
 
-def test_cli_passes_and_prints_provenance(capsys) -> None:
+def test_cli_passes_and_prints_provenance_and_subgroups(capsys) -> None:
     assert research_cli.main([]) == 0
     out = capsys.readouterr().out
     assert "gate: PASS" in out
     assert "RESEARCH_QUERY_PLANNER_PROMPT_V1" in out
     assert "RESEARCH-CONTRACT-V1" in out
+    assert "by language:" in out
+    for language in MULTILINGUAL_SUBGROUPS:
+        assert f"    {language}: cases=" in out
 
 
 def test_cli_report_is_written_to_the_report_directory(tmp_path, monkeypatch) -> None:

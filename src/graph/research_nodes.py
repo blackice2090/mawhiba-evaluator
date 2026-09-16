@@ -249,12 +249,17 @@ def official_requirements_retrieval(state: EvaluationGraphState, config: Runnabl
     node = NodeId.OFFICIAL_REQUIREMENTS_RETRIEVAL
     started_at = workflow_now()
     run = _require_run(state)
-    seeds = _research_settings(config).official.seed_urls
+    official_settings = _research_settings(config).official
+    seeds = official_settings.seeds
+    target_edition = official_settings.target_edition
     provider = _configurable(config).get(OFFICIAL_WEB_PROVIDER_KEY)
 
     if provider is None:
         result = OfficialRequirementsResult(
-            outcome=OfficialRequirementsOutcome.OFFICIAL_REQUIREMENTS_UNAVAILABLE, seed_urls=seeds)
+            outcome=OfficialRequirementsOutcome.OFFICIAL_REQUIREMENTS_UNAVAILABLE,
+            seeds=seeds,
+            target_edition=target_edition,
+        )
         run = run.evolve(status=ResearchRunStatus.RUNNING, official_requirements=result, errors=[
             *run.errors,
             _issue(ResearchIssueCode.OFFICIAL_WEB_PROVIDER_MISSING, node, "no official web provider injected", OFFICIAL),
@@ -265,7 +270,12 @@ def official_requirements_retrieval(state: EvaluationGraphState, config: Runnabl
                      run=run, warnings=["OFFICIAL_REQUIREMENTS_UNAVAILABLE"])
 
     candidates = retrieve_official_candidates(provider, seeds, run.research_run_id)
-    result = OfficialRequirementsResult(seed_urls=seeds, web_provider=provider.name, candidates=candidates)
+    result = OfficialRequirementsResult(
+        seeds=seeds,
+        target_edition=target_edition,
+        web_provider=provider.name,
+        candidates=candidates,
+    )
     run = run.evolve(status=ResearchRunStatus.RUNNING, official_requirements=result)
     return _done(state, node, started_at, f"Retrieved {len(candidates)} source candidate(s); not yet trusted.",
                  run=run)
@@ -279,7 +289,9 @@ def verify_official_sources(state: EvaluationGraphState) -> dict[str, Any]:
     if result is None or result.outcome is not OfficialRequirementsOutcome.NOT_STARTED:
         return _done(state, node, started_at, "No candidates to verify.", status=NodeStatus.SKIPPED)
 
-    decisions, snapshots, records = verify_official_candidates(result.candidates)
+    decisions, snapshots, records = verify_official_candidates(
+        result.candidates, target_edition=result.target_edition
+    )
     errors = list(run.errors)
     outcome = OfficialRequirementsOutcome.NOT_STARTED
     if not snapshots:

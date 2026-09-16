@@ -17,9 +17,9 @@ from src.intake.anchors import collapse_whitespace, normalize_unicode, value_sup
 from src.research.inputs import resolve_research_field
 from src.research.privacy import EMPTY_PRIVACY_CONTEXT, ResearchPrivacyContext, contains_pii
 from src.research.vocabulary import (
-    CONFIRMATION_BIAS_MARKERS,
-    INJECTION_MARKERS,
-    QUERY_CONNECTOR_TOKENS,
+    ALL_CONFIRMATION_BIAS_MARKERS,
+    ALL_INJECTION_MARKERS,
+    ALL_QUERY_CONNECTOR_TOKENS,
 )
 from src.schemas.common import ExtractionMode, ResearchBranch
 from src.schemas.research import (
@@ -158,11 +158,11 @@ def check_candidate_query(
 
     if any(contains_pii(text, privacy) for text in (query, *terms, *expansions)):
         reasons.append(R.PII_DETECTED)
-    if _has_marker(query, INJECTION_MARKERS) or any(
-        _has_marker(e, INJECTION_MARKERS) for e in expansions
+    if _has_marker(query, ALL_INJECTION_MARKERS) or any(
+        _has_marker(e, ALL_INJECTION_MARKERS) for e in expansions
     ):
         reasons.append(R.SUSPECTED_PROMPT_INJECTION)
-    if _has_marker(query, CONFIRMATION_BIAS_MARKERS):
+    if _has_marker(query, ALL_CONFIRMATION_BIAS_MARKERS):
         reasons.append(R.CONFIRMATION_BIASED_PHRASING)
 
     if not candidate.source_terms:
@@ -183,7 +183,7 @@ def check_candidate_query(
     if any(not e for e in expansions):
         reasons.append(R.EMPTY_EXPANSION_TERM)
 
-    allowed = set(QUERY_CONNECTOR_TOKENS)
+    allowed = set(ALL_QUERY_CONNECTOR_TOKENS)
     for text in (*terms, *expansions):
         allowed.update(text_tokens(text))
     if query and any(token not in allowed for token in text_tokens(query)):

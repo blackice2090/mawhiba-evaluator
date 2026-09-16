@@ -14,7 +14,12 @@ from src.evals.baseline import REPORT_ROOT
 from src.evals.metrics import MetricCounts
 from src.evals.research.dataset import DEFAULT_RESEARCH_DATASET_VERSION, load_research_dataset
 from src.evals.research.metrics import violation_rate
-from src.evals.research.runner import EVAL_LLM_SETTINGS, evaluate_research_gate, run_research_dataset
+from src.evals.research.runner import (
+    EVAL_LLM_SETTINGS,
+    evaluate_research_gate,
+    run_research_dataset,
+    score_by_language,
+)
 from src.research.planner import PLANNER_VERSION
 from src.schemas.common import utc_now
 from src.schemas.research import RESEARCH_CONTRACT_VERSION
@@ -31,7 +36,8 @@ def main(argv: list[str] | None = None) -> int:
     args = parser.parse_args(argv)
 
     dataset = load_research_dataset(args.dataset)
-    metrics, _ = run_research_dataset(dataset)
+    metrics, results = run_research_dataset(dataset)
+    by_language = score_by_language(dataset, results)
     gate = evaluate_research_gate(metrics)
     provenance = {
         "dataset_version": dataset.version,
@@ -52,6 +58,16 @@ def main(argv: list[str] | None = None) -> int:
     print("  release-blocking:")
     for name, counts in metrics.safety_metrics.items():
         print(f"    {name}: {counts.violations} violation(s) / {counts.checked} checked")
+    print("  by language:")
+    for language in sorted(by_language):
+        subgroup = by_language[language]
+        traceability = subgroup.query_source_traceability
+        print(
+            f"    {language}: cases={subgroup.cases_evaluated} "
+            f"traceability={traceability.matched}/{traceability.total} = {_rate(traceability)}"
+        )
+        for name, counts in subgroup.safety_metrics.items():
+            print(f"      {name}: {counts.violations} violation(s) / {counts.checked} checked")
     print(f"  gate: {gate.summary()}")
 
     if args.report:
@@ -60,6 +76,7 @@ def main(argv: list[str] | None = None) -> int:
         path = REPORT_ROOT / f"research_planning_{stamp}.json"
         path.write_text(
             json.dumps({"provenance": provenance, "metrics": metrics.to_report(),
+                        "by_language": {k: v.to_report() for k, v in by_language.items()},
                         "gate": {"passed": gate.passed, "violations": gate.violations}},
                        indent=2, ensure_ascii=False),
             encoding="utf-8",

@@ -1,0 +1,19 @@
+{
+  "language": "ar",
+  "version": "AR-SEARCH-VOCABULARY-V1",
+  "note": "Reviewed Arabic search vocabulary. Generic search words only: no project facts, no technology names, no domain terms. Kept as data so the developer layer stays English (see docs/phase2a1_hardening.md).",
+  "connector_tokens": [
+    "في", "من", "على", "مع", "بدون", "عن", "إلى", "أو", "و", "باستخدام", "مقابل",
+    "مقارنة", "المقارنة", "قيود", "القيود", "بدائل", "البدائل", "أعطال", "الأعطال",
+    "فشل", "حالات", "حل", "حلول", "الحلول", "قائمة", "القائمة", "مشكلة", "مشكلات",
+    "تحديات", "مراجعة", "دراسات", "أبحاث", "حديثة", "براءات", "اختراع", "منتجات",
+    "تجارية", "مفتوحة", "المصدر", "معايير", "المعايير", "تقنيات", "طرق", "أساليب",
+    "أنظمة", "نظام", "منهجية", "مسح"
+  ],
+  "confirmation_bias_markers": [
+    "مزايا", "فوائد", "لماذا", "أفضل", "تفوق", "يثبت", "نجاح"
+  ],
+  "injection_markers": [
+    "تجاهل", "أنت الآن", "مستوى الجدة", "اعط درجة", "تجاهل التعليمات"
+  ]
+}

@@ -185,11 +185,13 @@ not obvious from the code.
 - `docs/phase1b_trusted_intake.md` — provider abstraction, provenance, evaluation boundary
 - `docs/phase1c_intake_evals.md` — canonical intake model, taxonomy, Gold evals
 - `docs/phase2a_research_foundation.md` — research runs, query provenance, official requirements
+- `docs/phase2a1_hardening.md` — official hosts and currency, source identity, shared retry layer, multilingual planning
+- `docs/phase2a_execution_spec.md` — the reviewed Phase 2A execution specification
 - `docs/adr/ADR-00{1..7}-*.md` — decisions and their rejected alternatives
 
 ## Phase discipline
 
-Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A). Phase 2A added
+Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A, 2A.1). Phase 2A added
 the research foundation: `ResearchRun` on graph state (never in `ProjectState`),
 verified query planning, and official Mawhiba requirements retrieval
 (`build_phase2a_research_graph()`). Research planning must never write

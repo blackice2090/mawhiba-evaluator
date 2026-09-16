@@ -30,7 +30,7 @@ from src.llm.fake_provider import (
 from src.research import inputs as research_inputs
 from src.research import planner as research_planner
 from src.research import privacy as research_privacy
-from src.research.vocabulary import QUERY_CONNECTOR_TOKENS
+from src.research.vocabulary import ALL_QUERY_CONNECTOR_TOKENS
 from src.schemas.research import CandidateQueryPlan, QueryPlanLimits, ResearchQuery, VerifiedQueryPlan
 
 logger = logging.getLogger(__name__)
@@ -128,7 +128,7 @@ def query_is_traceable(project: ProjectState, query: ResearchQuery) -> bool:
     query word is a source-term, expansion-term or connector word."""
     if not query.source_terms or not query.query:
         return False
-    allowed = set(QUERY_CONNECTOR_TOKENS)
+    allowed = set(ALL_QUERY_CONNECTOR_TOKENS)
     for source in query.source_terms:
         values = research_inputs.resolve_research_field(project, source.field_path) or []
         if not any(_contained(source.term, value) for value in values):
@@ -226,6 +226,25 @@ def run_research_dataset(
         results.append(result)
         score_research_case(case, result, metrics)
     return metrics, results
+
+
+def score_by_language(
+    dataset: ResearchGoldDataset, results: list[ResearchCaseResult]
+) -> dict[str, ResearchPlanningMetrics]:
+    """Per-language metrics.
+
+    An aggregate pass can hide a language that fails: Arabic and mixed-language
+    planning must meet the same release-blocking targets as English, measured
+    separately.
+    """
+    by_id = {case.case_id: case for case in dataset.cases}
+    grouped: dict[str, ResearchPlanningMetrics] = {}
+    for result in results:
+        case = by_id.get(result.case_id)
+        if case is None:
+            continue
+        score_research_case(case, result, grouped.setdefault(case.language, ResearchPlanningMetrics()))
+    return grouped
 
 
 @dataclass

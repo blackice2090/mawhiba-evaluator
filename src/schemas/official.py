@@ -10,6 +10,10 @@ The trust progression for the official branch is explicit in the types:
 
 Nothing here is an ``EvidenceRecord``. Retrieval produces candidates;
 verification produces sources; evidence extraction is a later stage (ADR-007).
+
+Phase 2A.1 additionally separates five things that are easy to conflate:
+official authority, publication date, competition edition, retrieval date, and
+current status. A page can be official without being current.
 """
 
 from __future__ import annotations
@@ -19,13 +23,28 @@ from uuid import UUID, uuid4
 
 from pydantic import Field, model_validator
 
-from src.schemas.common import MawhibaModel, ResearchBranch, UtcDatetime, utc_now
+from src.schemas.common import (
+    CANONICAL_SOURCE_ID_PATTERN,
+    DISPLAY_ID_PATTERN,
+    MawhibaModel,
+    ResearchBranch,
+    UtcDatetime,
+    utc_now,
+)
 from src.schemas.extraction import ModelFacingModel, VerifiedAnchor
-from src.schemas.source import SourceRecord, SourceType, VerificationStatus
+from src.schemas.source import (
+    SourceFingerprint,
+    SourceRecord,
+    SourceType,
+    VerificationStatus,
+)
 
 HASH_NORMALIZATION_VERSION = "TEXT-NORMALIZATION-V1"
 """Line endings to LF, NFC, invisible characters removed, quotes folded,
 whitespace runs collapsed. Wording changes always change the hash."""
+
+MIN_COMPETITION_EDITION = 2000
+MAX_COMPETITION_EDITION = 2100
 
 
 class CriteriaAuthority(StrEnum):
@@ -33,6 +52,61 @@ class CriteriaAuthority(StrEnum):
 
     OFFICIAL_MAWHIBA_CRITERIA = "OFFICIAL_MAWHIBA_CRITERIA"
     AGENT_ADVISORY_RUBRIC = "AGENT_ADVISORY_RUBRIC"
+
+
+class OfficialPageKind(StrEnum):
+    """What role an official page plays, declared by a reviewer in configuration.
+
+    The distinction exists because officialness says nothing about currency: a
+    genuine 2025 registration page is official and out of date at the same time.
+    """
+
+    EVERGREEN_SERVICE_PAGE = "EVERGREEN_SERVICE_PAGE"
+    CURRENT_EVENT_PAGE = "CURRENT_EVENT_PAGE"
+    HISTORICAL_EVENT_PAGE = "HISTORICAL_EVENT_PAGE"
+    DISCOVERY_PAGE = "DISCOVERY_PAGE"
+
+
+class EditionSource(StrEnum):
+    """Where a competition edition came from. Never from the retrieval date."""
+
+    NONE = "NONE"
+    SEED_DECLARATION = "SEED_DECLARATION"
+    PAGE_TITLE = "PAGE_TITLE"
+
+
+class OfficialCurrency(StrEnum):
+    """Whether verified official content applies to the edition under evaluation."""
+
+    CURRENT_EDITION = "CURRENT_EDITION"
+    EVERGREEN = "EVERGREEN"
+    HISTORICAL_EDITION = "HISTORICAL_EDITION"
+    UNDETERMINED = "UNDETERMINED"
+
+
+class OfficialSeed(MawhibaModel):
+    """One configured official URL and the role a reviewer assigned to it."""
+
+    url: str = Field(min_length=1)
+    kind: OfficialPageKind = OfficialPageKind.EVERGREEN_SERVICE_PAGE
+    competition_edition: int | None = Field(
+        default=None, ge=MIN_COMPETITION_EDITION, le=MAX_COMPETITION_EDITION
+    )
+    note: str | None = None
+
+    @model_validator(mode="after")
+    def _edition_matches_kind(self) -> OfficialSeed:
+        event_page = self.kind in (
+            OfficialPageKind.CURRENT_EVENT_PAGE,
+            OfficialPageKind.HISTORICAL_EVENT_PAGE,
+        )
+        if event_page and self.competition_edition is None:
+            raise ValueError(f"{self.kind.value} must declare its competition_edition")
+        if not event_page and self.competition_edition is not None:
+            raise ValueError(
+                f"{self.kind.value} describes no single edition and must not declare one"
+            )
+        return self
 
 
 class RetrievalStatus(StrEnum):
@@ -89,6 +163,10 @@ class SourceCandidate(MawhibaModel):
     branch: ResearchBranch = ResearchBranch.OFFICIAL_REQUIREMENTS
     requested_url: str = Field(min_length=1)
     final_url: str | None = None
+    page_kind: OfficialPageKind = OfficialPageKind.DISCOVERY_PAGE
+    declared_edition: int | None = Field(
+        default=None, ge=MIN_COMPETITION_EDITION, le=MAX_COMPETITION_EDITION
+    )
     retrieval_status: RetrievalStatus
     http_status: int | None = Field(default=None, ge=100, le=599)
     content_type: str | None = None
@@ -127,7 +205,8 @@ class SourceVerificationDecision(MawhibaModel):
     requested_url: str = Field(min_length=1)
     accepted: bool
     rejection_reason: SourceRejectionReason | None = None
-    source_id: str | None = Field(default=None, pattern=r"^SRC-\d{3,}$")
+    source_id: str | None = Field(default=None, pattern=CANONICAL_SOURCE_ID_PATTERN)
+    display_id: str | None = Field(default=None, pattern=DISPLAY_ID_PATTERN)
 
     @model_validator(mode="after")
     def _consistent(self) -> SourceVerificationDecision:
@@ -141,12 +220,14 @@ class SourceVerificationDecision(MawhibaModel):
 class OfficialSourceSnapshot(MawhibaModel):
     """A verified, content-hashed capture of one official page (2.4).
 
-    ``(canonical_url, content_hash)`` identifies a requirements version: the same
-    URL with changed content is a different version.
+    Its ``fingerprint`` carries the deterministic identity: the same canonical URL
+    with the same content hash is the same requirements version, and the same URL
+    with a different hash is a different version of the same logical source.
     """
 
     snapshot_id: UUID = Field(default_factory=uuid4)
-    source_id: str = Field(pattern=r"^SRC-\d{3,}$")
+    source_id: str = Field(pattern=CANONICAL_SOURCE_ID_PATTERN)
+    display_id: str | None = Field(default=None, pattern=DISPLAY_ID_PATTERN)
     candidate_id: UUID
     url: str = Field(min_length=1)
     canonical_url: str = Field(min_length=1)
@@ -155,8 +236,21 @@ class OfficialSourceSnapshot(MawhibaModel):
     retrieved_at: UtcDatetime
     published_at: UtcDatetime | None = None
     effective_at: UtcDatetime | None = None
+    page_kind: OfficialPageKind = OfficialPageKind.DISCOVERY_PAGE
+    competition_edition: int | None = Field(
+        default=None, ge=MIN_COMPETITION_EDITION, le=MAX_COMPETITION_EDITION
+    )
+    edition_source: EditionSource = EditionSource.NONE
+    currency: OfficialCurrency = OfficialCurrency.UNDETERMINED
+    assessed_against_edition: int | None = Field(
+        default=None,
+        ge=MIN_COMPETITION_EDITION,
+        le=MAX_COMPETITION_EDITION,
+        description="The edition under evaluation when currency was assessed.",
+    )
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     hash_normalization: str = HASH_NORMALIZATION_VERSION
+    fingerprint: SourceFingerprint
     captured_text: str = Field(min_length=1)
     verification_status: VerificationStatus = VerificationStatus.VERIFIED_FULL_TEXT
     authority: CriteriaAuthority = CriteriaAuthority.OFFICIAL_MAWHIBA_CRITERIA
@@ -167,15 +261,28 @@ class OfficialSourceSnapshot(MawhibaModel):
             raise ValueError("an official snapshot exists only after verification")
         if self.authority is not CriteriaAuthority.OFFICIAL_MAWHIBA_CRITERIA:
             raise ValueError("an official snapshot cannot carry advisory authority")
+        if self.fingerprint.identifier != self.canonical_url:
+            raise ValueError("fingerprint identifier must be the canonical URL")
+        if self.fingerprint.content_hash != self.content_hash:
+            raise ValueError("fingerprint content_hash must match the snapshot hash")
+        if (self.competition_edition is None) != (self.edition_source is EditionSource.NONE):
+            raise ValueError("a competition edition must state where it came from")
+        if self.currency is OfficialCurrency.CURRENT_EDITION and self.competition_edition is None:
+            raise ValueError("CURRENT_EDITION requires a known competition edition")
         return self
 
     @property
-    def version_key(self) -> tuple[str, str]:
-        return (self.canonical_url, self.content_hash)
+    def version_key(self) -> tuple[str, str | None]:
+        return self.fingerprint.version_key
 
     @property
     def date_indicator(self) -> UtcDatetime | None:
         return self.effective_at or self.published_at
+
+    @property
+    def is_usable_as_current(self) -> bool:
+        """Evergreen guidance, or content for the edition under evaluation."""
+        return self.currency in (OfficialCurrency.CURRENT_EDITION, OfficialCurrency.EVERGREEN)
 
     def to_source_record(self) -> SourceRecord:
         """The Phase 0 ``SourceRecord`` for this snapshot. Never an evidence record."""
@@ -183,6 +290,8 @@ class OfficialSourceSnapshot(MawhibaModel):
 
         return SourceRecord(
             source_id=self.source_id,
+            display_id=self.display_id,
+            fingerprint=self.fingerprint,
             source_type=SourceType.OFFICIAL_COMPETITION_SOURCE,
             title=self.title,
             url=self.canonical_url,
@@ -220,10 +329,26 @@ class OfficialRequirementStatus(StrEnum):
     """Retrieval today is never enough to call a requirement current."""
 
     VERIFIED_CURRENT = "VERIFIED_CURRENT"
-    VERIFIED_BUT_DATE_UNKNOWN = "VERIFIED_BUT_DATE_UNKNOWN"
+    VERIFIED_EVERGREEN = "VERIFIED_EVERGREEN"
+    VERIFIED_CURRENCY_UNKNOWN = "VERIFIED_CURRENCY_UNKNOWN"
+    HISTORICAL = "HISTORICAL"
     CONFLICTED = "CONFLICTED"
     SUPERSEDED = "SUPERSEDED"
     UNVERIFIED = "UNVERIFIED"
+
+
+APPLICABLE_REQUIREMENT_STATUSES: frozenset[OfficialRequirementStatus] = frozenset(
+    {OfficialRequirementStatus.VERIFIED_CURRENT, OfficialRequirementStatus.VERIFIED_EVERGREEN}
+)
+"""Statuses that may inform an evaluation of the edition under assessment.
+Historical and superseded requirements are kept, never applied, never discarded."""
+
+CURRENCY_TO_REQUIREMENT_STATUS: dict[OfficialCurrency, OfficialRequirementStatus] = {
+    OfficialCurrency.CURRENT_EDITION: OfficialRequirementStatus.VERIFIED_CURRENT,
+    OfficialCurrency.EVERGREEN: OfficialRequirementStatus.VERIFIED_EVERGREEN,
+    OfficialCurrency.HISTORICAL_EDITION: OfficialRequirementStatus.HISTORICAL,
+    OfficialCurrency.UNDETERMINED: OfficialRequirementStatus.VERIFIED_CURRENCY_UNKNOWN,
+}
 
 
 class RequirementRejectionReason(StrEnum):
@@ -269,7 +394,7 @@ class OfficialRequirement(MawhibaModel):
     """An anchor-verified official requirement. The statement is the source span."""
 
     requirement_id: UUID = Field(default_factory=uuid4)
-    source_id: str = Field(pattern=r"^SRC-\d{3,}$")
+    source_id: str = Field(pattern=CANONICAL_SOURCE_ID_PATTERN)
     snapshot_id: UUID
     content_hash: str = Field(pattern=r"^[0-9a-f]{64}$")
     category: OfficialRequirementCategory
@@ -281,6 +406,9 @@ class OfficialRequirement(MawhibaModel):
     official_weight_text: str | None = None
     weight_rejection: WeightRejectionReason | None = None
     stated_date_text: str | None = None
+    competition_edition: int | None = Field(
+        default=None, ge=MIN_COMPETITION_EDITION, le=MAX_COMPETITION_EDITION
+    )
     authority: CriteriaAuthority = CriteriaAuthority.OFFICIAL_MAWHIBA_CRITERIA
     status: OfficialRequirementStatus
     retrieved_at: UtcDatetime
@@ -307,6 +435,10 @@ class OfficialRequirement(MawhibaModel):
             raise ValueError("stated_date_text must appear in the verified statement")
         return self
 
+    @property
+    def is_applicable(self) -> bool:
+        return self.status in APPLICABLE_REQUIREMENT_STATUSES
+
 
 class RejectedOfficialRequirement(MawhibaModel):
     """Audit record of a candidate requirement deterministic code refused."""
@@ -320,15 +452,19 @@ class RejectedOfficialRequirement(MawhibaModel):
 
 class ConflictResolutionBasis(StrEnum):
     UNRESOLVED = "UNRESOLVED"
+    NEWER_COMPETITION_EDITION = "NEWER_COMPETITION_EDITION"
     NEWER_EFFECTIVE_DATE = "NEWER_EFFECTIVE_DATE"
     NEWER_PUBLICATION_DATE = "NEWER_PUBLICATION_DATE"
 
 
 class ConflictSide(MawhibaModel):
     requirement_id: UUID
-    source_id: str = Field(pattern=r"^SRC-\d{3,}$")
+    source_id: str = Field(pattern=CANONICAL_SOURCE_ID_PATTERN)
     statement: str
     official_weight: float | None = None
+    competition_edition: int | None = Field(
+        default=None, ge=MIN_COMPETITION_EDITION, le=MAX_COMPETITION_EDITION
+    )
     effective_at: UtcDatetime | None = None
     published_at: UtcDatetime | None = None
 
@@ -368,7 +504,14 @@ class OfficialRequirementsResult(MawhibaModel):
     """Everything the OFFICIAL_REQUIREMENTS branch produced in one research run."""
 
     outcome: OfficialRequirementsOutcome = OfficialRequirementsOutcome.NOT_STARTED
-    seed_urls: list[str] = Field(default_factory=list)
+    seeds: list[OfficialSeed] = Field(default_factory=list)
+    target_edition: int | None = Field(
+        default=None,
+        ge=MIN_COMPETITION_EDITION,
+        le=MAX_COMPETITION_EDITION,
+        description="The competition edition being evaluated, if configured. Never "
+        "inferred from the retrieval date.",
+    )
     web_provider: str | None = None
     candidates: list[SourceCandidate] = Field(default_factory=list)
     decisions: list[SourceVerificationDecision] = Field(default_factory=list)
@@ -405,9 +548,19 @@ class OfficialRequirementsResult(MawhibaModel):
         return self
 
     @property
+    def seed_urls(self) -> list[str]:
+        return [seed.url for seed in self.seeds]
+
+    @property
     def official_requirements_checked(self) -> bool:
         """True only when official content was actually retrieved and verified."""
         return self.outcome is OfficialRequirementsOutcome.OFFICIAL_REQUIREMENTS_VERIFIED
+
+    @property
+    def applicable_requirements(self) -> list[OfficialRequirement]:
+        """Current-edition and evergreen requirements. Historical ones are kept
+        in ``requirements`` but never applied."""
+        return [r for r in self.requirements if r.is_applicable]
 
     def snapshot_for(self, source_id: str) -> OfficialSourceSnapshot | None:
         return next((s for s in self.snapshots if s.source_id == source_id), None)

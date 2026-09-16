@@ -9,6 +9,7 @@ from __future__ import annotations
 from datetime import datetime, timezone
 from enum import StrEnum
 from typing import Annotated, Generic, TypeVar
+from uuid import uuid4
 
 from pydantic import AfterValidator, BaseModel, ConfigDict, Field, model_validator
 
@@ -357,6 +358,41 @@ class BranchStatus(StrEnum):
     IN_PROGRESS = "IN_PROGRESS"
     COMPLETED = "COMPLETED"
     FAILED = "FAILED"
+
+
+# ---------------------------------------------------------------------------
+# Source identity (Phase 2A.1)
+# ---------------------------------------------------------------------------
+
+_UUID_SUFFIX = r"[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}"
+
+CANONICAL_SOURCE_ID_PATTERN = rf"^SRC-{_UUID_SUFFIX}$"
+"""The only form new code mints: opaque, globally collision-resistant.
+
+Two research runs, in any branch, cannot independently produce the same
+``source_id``, so sources from different runs can be merged safely.
+"""
+
+LEGACY_SOURCE_ID_PATTERN = r"^SRC-\d{3,}$"
+"""Phase 0 sequence form. Still loadable so existing snapshots and fixtures
+validate, never minted by new code, and never globally unique."""
+
+SOURCE_ID_PATTERN = rf"^SRC-(?:\d{{3,}}|{_UUID_SUFFIX})$"
+"""What a stored source id may look like: canonical, or legacy for old data."""
+
+DISPLAY_ID_PATTERN = LEGACY_SOURCE_ID_PATTERN
+"""Human-readable sequence (``SRC-001``). A label for reports, never identity."""
+
+
+def new_source_id() -> str:
+    """Mint a canonical, globally unique source id."""
+    return f"SRC-{uuid4()}"
+
+
+def is_canonical_source_id(value: str) -> bool:
+    import re
+
+    return re.fullmatch(CANONICAL_SOURCE_ID_PATTERN, value) is not None
 
 
 class MawhibaModel(BaseModel):

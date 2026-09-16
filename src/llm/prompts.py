@@ -186,8 +186,12 @@ RULES
    competing techniques) goes ONLY in expansion_terms. Expansion terms are search
    aids, never project facts. At most the configured number per query.
 5. QUERY WORDS. Every word in a query must come from its source_terms, its
-   expansion_terms, or these generic search words:
+   expansion_terms, or these generic English search words:
    {", ".join(sorted(QUERY_CONNECTOR_TOKENS))}.
+   A small reviewed Arabic list of equally generic search words (for example the
+   Arabic for "limitations", "alternatives", "comparison", "open source") is
+   accepted on the same terms. Any other Arabic word must be a source term copied
+   from a field, or an expansion term. When in doubt, declare it as an expansion.
 6. ANTI-CONFIRMATION BIAS. Include, where relevant, queries for LIMITATIONS,
    ALTERNATIVES, FAILURE_MODES, COMPETING_METHODS and BENCHMARK. Never write
    advocacy queries such as "advantages of X", "benefits of X" or "why X is better".

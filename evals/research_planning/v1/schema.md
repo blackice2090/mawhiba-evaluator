@@ -53,3 +53,15 @@ alternative_methods    failure_modes           query_duplication
 invalid_field_reference budget_limits          provider_failure
 branch_purpose_rules   untraceable_terms
 ```
+
+Multilingual categories (Phase 2A.1):
+
+```
+arabic_problem_statement    arabic_solution_english_terms
+arabic_novelty_claim        arabic_performance_claim
+arabic_iot                  arabic_ai
+arabic_robotics             arabic_embedded
+arabic_ambiguous            arabic_prompt_injection
+arabic_pii                  arabic_anti_confirmation
+mixed_yolo_raspberry_pi     mixed_domain_terminology
+```

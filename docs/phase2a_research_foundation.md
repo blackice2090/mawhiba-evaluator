@@ -197,9 +197,11 @@ Relevance controls planning: no family is required for every project.
 * **Expansion terms** are search vocabulary — synonyms, broader concepts, competing
   techniques. They need not exist in `ProjectState` and are explicitly not facts.
 * **Every query word** must be a source-term word, an expansion-term word, or one of
-  the reviewed generic search words in `QUERY_CONNECTOR_TOKENS`
-  (`src/research/vocabulary.py`). An undeclared implementation detail ("Jetson
-  Nano") makes the query `UNTRACEABLE_QUERY_TOKEN`.
+  the reviewed generic search words. Two small reviewed lists exist, one per
+  language: English in `src/research/vocabulary.py`, Arabic in
+  `src/research/data/search_vocabulary_ar.json`. An undeclared implementation detail
+  ("Jetson Nano") makes the query `UNTRACEABLE_QUERY_TOKEN`. Arabic advocacy and
+  injection markers are enforced alongside the English ones.
 
 Expansion terms cannot mutate project facts **structurally**: `ResearchQuery` is not
 reachable from `ProjectState`, and no model reachable from `ProjectState` has an
@@ -314,18 +316,25 @@ Providers are injected through `config["configurable"]["official_web_provider"]`
 ```text
 mawhiba.sa
 www.mawhiba.sa
+mawhiba2.mawhiba.sa
 ```
 
 Exact host match. No wildcard subdomains: `portal.mawhiba.sa` is not official until
-it is confirmed and listed. Rejected: non-HTTPS schemes, lookalike hosts
+it is confirmed and listed. `mawhiba2.mawhiba.sa` serves the current Mawhiba service
+experience and was added in Phase 2A.1 (`docs/phase2a1_hardening.md`). Rejected: non-HTTPS schemes, lookalike hosts
 (`mawhiba.sa.evil.example`, `evilmawhiba.sa`), userinfo tricks
 (`https://www.mawhiba.sa@evil.example/`), backslashes and non-default ports. Both the
 requested URL and the final URL after redirects must pass.
 
-The only default seed is `https://www.mawhiba.sa/`. Specific National Olympiad for
-Scientific Creativity page URLs must be added to `OfficialRequirementsSettings`
-after a reviewer confirms them; they are never guessed, and the settings model
-refuses a non-allowlisted seed.
+Seeds are typed configuration (`OfficialSeed`): each carries a reviewer-assigned
+`OfficialPageKind` — `EVERGREEN_SERVICE_PAGE`, `CURRENT_EVENT_PAGE`,
+`HISTORICAL_EVENT_PAGE` or `DISCOVERY_PAGE` — and an event page must declare its
+`competition_edition`. The only default seed is the National Olympiad for Scientific
+Creativity service page on `mawhiba2.mawhiba.sa`, declared evergreen; the Mawhiba
+root is available as an opt-in discovery seed. No event page ships as a default, so
+a dated registration page can never pass as the current rules. Other URLs are added
+only after a reviewer confirms them, and the settings model refuses a
+non-allowlisted seed. See `docs/phase2a1_hardening.md`.
 
 ### Source candidate boundary
 
@@ -348,9 +357,12 @@ Candidate rejection reasons: `RETRIEVAL_FAILED`, `INSECURE_SCHEME`,
 * `content_hash` is SHA-256 over text normalized by `TEXT-NORMALIZATION-V1` (line
   endings, NFC, invisible characters, quote folding, whitespace runs). Transport
   noise does not change it; any change of wording does.
-* `(canonical_url, content_hash)` identifies a requirements version. **The same URL
-  with changed content is a different version.** The same version reached twice in a
-  run is snapshotted once.
+* `(canonical_url, content_hash)` identifies a requirements version, carried by a
+  `SourceFingerprint`. **The same URL with changed content is a different version**
+  of the same logical source. The same version reached twice in a run is snapshotted
+  once.
+* `source_id` is a globally unique opaque id (`SRC-<uuid4>`); `display_id`
+  (`SRC-001`) is a readable label and never identity (Phase 2A.1).
 * Dates are never invented. Without explicit page metadata, `published_at` and
   `effective_at` are `None`.
 * The snapshot's `SourceRecord` is `OFFICIAL_COMPETITION_SOURCE`, Tier A,
@@ -379,23 +391,30 @@ Rejections: `INVALID_CATEGORY`, `EMPTY_SUBJECT`, `EMPTY_STATEMENT`, `EMPTY_EXCER
 
 | Status | When |
 |---|---|
-| `VERIFIED_CURRENT` | verified, and the snapshot carries an explicit effective or publication date not after retrieval |
-| `VERIFIED_BUT_DATE_UNKNOWN` | verified, with no explicit date (or only a future effective date) |
+| `VERIFIED_CURRENT` | the snapshot's competition edition equals the configured `target_edition` |
+| `VERIFIED_EVERGREEN` | an evergreen service page that claims no single edition |
+| `VERIFIED_CURRENCY_UNKNOWN` | verified, but the edition is unknown or unconfigured |
+| `HISTORICAL` | a past competition edition; kept, never applied |
 | `CONFLICTED` | in an unresolved conflict with another official source |
-| `SUPERSEDED` | a dated newer official source was preferred |
+| `SUPERSEDED` | a newer official source was preferred |
 | `UNVERIFIED` | never an accepted requirement; rejected candidates are ledgered instead |
 
-Information is never called current merely because it was retrieved today.
+Information is never called current merely because it was retrieved today: the
+retrieval date is not an input to currency at all. Only `VERIFIED_CURRENT` and
+`VERIFIED_EVERGREEN` are applicable to an evaluation. See
+`docs/phase2a1_hardening.md` for the full currency rules.
 
 ### Conflicting official sources
 
 Items from different sources with the same category and subject but different
 statements or weights form an `OfficialRequirementConflict` that keeps **every
-side**: requirement, source, statement, weight, effective and publication dates.
-The newer source is preferred only when explicit dates on every side establish it
-(`NEWER_EFFECTIVE_DATE`, then `NEWER_PUBLICATION_DATE`); the older side becomes
-`SUPERSEDED`. Otherwise the conflict is `UNRESOLVED`, every side is `CONFLICTED`, and
-the run records `OFFICIAL_SOURCE_CONFLICT`. Nothing is discarded.
+side**: requirement, source, statement, weight, competition edition, effective and
+publication dates. The newer source is preferred only when the evidence on every side
+establishes it, in a fixed order: `NEWER_COMPETITION_EDITION`, then
+`NEWER_EFFECTIVE_DATE`, then `NEWER_PUBLICATION_DATE`. The older side becomes
+`SUPERSEDED`, or stays `HISTORICAL` when it was already known to belong to a past
+edition. Otherwise the conflict is `UNRESOLVED`, every side is `CONFLICTED`, and the
+run records `OFFICIAL_SOURCE_CONFLICT`. Nothing is discarded.
 
 ### Official versus advisory criteria
 
@@ -478,8 +497,8 @@ Runtime config keys: `structured_model_provider`, `llm_settings`,
 
 ## 13. Evals
 
-`evals/research_planning/v1/cases.jsonl` — 32 synthetic cases, schema in
-`evals/research_planning/v1/schema.md`. 27 English, 2 Arabic, 3 mixed.
+`evals/research_planning/v1/cases.jsonl` — 47 synthetic cases, schema in
+`evals/research_planning/v1/schema.md`. 27 English, 12 Arabic, 8 mixed.
 
 Categories: AI, machine learning, computer vision, IoT, robotics, embedded systems,
 software, mixed domain, Arabic, mixed language, minimal description, novelty claim,
@@ -506,23 +525,33 @@ the verifier, so disabling a verifier rule cannot disable the metric watching it
 Every metric exposes numerator and denominator; an unmeasured metric reports `None`.
 The gate passes only with zero release-blocking violations and no errored case.
 
-Deterministic results (fake provider, 32 cases):
+Deterministic results (fake provider, 47 cases):
 
 ```text
-query_source_traceability        82/82
-required_query_family_coverage   71/71
-accepted_query_set_accuracy      32/32
-rejection_reason_accuracy        36/36
-anti_confirmation_accuracy       31/31
-duplicate_removal_accuracy        3/3
-plan_issue_accuracy              32/32
-planner_invocation_accuracy      32/32
-duplicate_query_rate              0/82
+query_source_traceability      127/127
+required_query_family_coverage 113/113
+accepted_query_set_accuracy      47/47
+rejection_reason_accuracy        49/49
+anti_confirmation_accuracy       46/46
+duplicate_removal_accuracy         4/4
+plan_issue_accuracy              47/47
+planner_invocation_accuracy      47/47
+duplicate_query_rate             0/127
 
-pii_leakage_rate                  0 violations / 113 checked
-invalid_field_reference_rate      0 violations / 129 checked
-project_state_mutation_rate       0 violations /  32 checked
-untraceable_accepted_queries      0 violations /  82 checked
+pii_leakage_rate                  0 violations / 173 checked
+invalid_field_reference_rate      0 violations / 193 checked
+project_state_mutation_rate       0 violations /  47 checked
+untraceable_accepted_queries      0 violations / 127 checked
+```
+
+Release-blocking metrics are also reported per language, so an aggregate pass cannot
+hide a failing subgroup:
+
+```text
+             cases  traceability   pii  invalid-ref  mutation  untraceable
+en              27      67/67       0/93     0/107      0/27       0/67
+ar              12      36/36       0/48      0/44      0/12       0/36
+mixed            8      24/24       0/32      0/42       0/8       0/24
 ```
 
 ### Negative controls
@@ -555,13 +584,14 @@ The standard suite needs no API key, no internet and no Mawhiba availability.
    coverage only.
 2. **Official sources are not merged into `ProjectState.sources`.** They live on the
    `ResearchRun`; merging them is a later, separately reviewed stage.
-3. **Only the Mawhiba root is seeded by default.** Competition-specific page URLs
-   require reviewer confirmation before configuration.
+3. **Only the evergreen service page is seeded by default.** Edition-specific page
+   URLs require reviewer confirmation and an explicit declared edition.
 4. **Official conflict grouping depends on the model's `subject` label.** A mislabelled
    subject can hide a conflict or group unrelated items; both sides are always kept.
 5. **Token containment is not entailment.** A traceable query can still be a weak one.
-6. **The connector vocabulary is English-only**; Arabic function words must be
-   declared as expansions.
+6. **The connector vocabularies are small and reviewed per language.** An Arabic or
+   English word outside them must be declared as an expansion term. Arabic matching
+   is exact: no alef/ya normalization and no diacritic folding.
 7. **PII detection is pattern- and context-based.** A name not supplied in the
    identity context and not matching a pattern is not detected.
 8. **HTML text extraction is minimal** (stdlib parser). JavaScript-rendered pages and
