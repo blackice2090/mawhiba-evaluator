@@ -748,6 +748,39 @@ OpenAI Responses API يستخدم داخل الـ Nodes.
 >
 > Details: `docs/phase2b_academic_research_connectors.md`.
 
+> **Amended in Phase 2C (ADR-011, ADR-012, ADR-013).**
+>
+> **Evidence extraction trust progression.** Verified source metadata becomes
+> evidence only through a versioned content snapshot and a deterministic
+> provenance check:
+>
+> ```text
+> Verified Academic Source
+>         ↓
+> Source Content Snapshot          provider-attributed, hashed, ABSTRACT today
+>         ↓
+> Evidence Candidate               LLM proposes. UNTRUSTED
+>         ↓
+> Exact Provenance Verification    code derives the span; excerpt is sliced from
+>                                  the snapshot, never taken from the model
+>         ↓
+> Verified Extracted Evidence      ExtractedEvidence on the ResearchRun
+>         ↓
+> [LATER]
+> Claim–Evidence Alignment
+> ```
+>
+> `EvidenceRecord` (7.2) remains the canonical contract and is **not** written by
+> Phase 2C: it requires its source inside `ProjectState.sources`, and verified
+> academic sources deliberately live on the `ResearchRun` (ADR-010). Phase 2C
+> therefore produces a research-layer `ExtractedEvidence` that carries canonical
+> evidence semantics — source anchor, verbatim excerpt, verified offsets — while
+> being structurally unable to express claim support, contradiction or strength
+> (ADR-012). Evidence from an abstract stays abstract-scoped and is never
+> presented as full-text-verified (ADR-013).
+>
+> Details: `docs/phase2c_evidence_extraction.md`.
+
 ### Important
 نتيجة Search وحدها ليست دليلًا نهائيًا.
 يتم Fetch/verify metadata للمصادر المختارة قبل استخدامها.

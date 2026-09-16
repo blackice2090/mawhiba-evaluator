@@ -2,6 +2,8 @@
 
 from __future__ import annotations
 
+import re
+
 from datetime import datetime, timezone
 from pathlib import Path
 from uuid import uuid4
@@ -212,12 +214,22 @@ def test_source_ids_are_globally_unique_across_runs() -> None:
 
 
 def test_research_code_never_constructs_evidence_records() -> None:
-    """Release-blocking: search results and sources never become evidence in Phase 2A."""
+    """Release-blocking: search results and sources never become evidence in Phase 2A.
+
+    The canonical evidence module is ``src.schemas.evidence``. Phase 2C added a
+    deliberately separate ``src.schemas.evidence_extraction`` whose entire point
+    is that it is *not* that module -- it cannot express claim support and never
+    reaches ``ProjectState.evidence`` (ADR-012). The match is therefore anchored
+    to the exact module name rather than a prefix, which makes this guard
+    stricter: an import of the canonical module is caught even where the loose
+    substring would previously have been satisfied by a longer name.
+    """
+    canonical_import = re.compile(r"\bsrc\.schemas\.evidence\b(?!_)")
     paths = [*(ROOT / "src" / "research").rglob("*.py"), ROOT / "src" / "graph" / "research_nodes.py",
              ROOT / "src" / "graph" / "phase2a_graph.py"]
     for path in paths:
         text = path.read_text(encoding="utf-8")
-        assert "src.schemas.evidence" not in text, path
+        assert not canonical_import.search(text), path
         assert "EvidenceRecord(" not in text, path
 
 

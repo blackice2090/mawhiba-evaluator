@@ -37,11 +37,15 @@ Python 3.12+ is required. A local venv is at `.venv`.
 # Academic retrieval eval (deterministic, fake providers)
 ./.venv/Scripts/python.exe -m src.evals.academic.cli
 
+# Evidence extraction eval (deterministic, fake provider)
+./.venv/Scripts/python.exe -m src.evals.evidence.cli
+
 # Live evals / live integration tests -- NEVER run these without being asked
 RUN_OPENAI_INTAKE_EVALS=1 ./.venv/Scripts/python.exe -m src.evals.cli --live
 RUN_OPENAI_INTEGRATION_TESTS=1 ./.venv/Scripts/python.exe -m pytest tests/test_openai_integration.py
 RUN_OFFICIAL_WEB_TESTS=1 ./.venv/Scripts/python.exe -m pytest tests/test_official_web_integration.py
 RUN_CONSENSUS_TESTS=1 RUN_OPENALEX_TESTS=1 RUN_SEMANTIC_SCHOLAR_TESTS=1 ./.venv/Scripts/python.exe -m pytest tests/test_academic_live_integration.py
+RUN_EVIDENCE_LLM_TESTS=1 ./.venv/Scripts/python.exe -m pytest tests/test_evidence_llm_integration.py
 ```
 
 No linter or type checker is configured. Do not add one without being asked.
@@ -141,6 +145,9 @@ until one of the two is true — that is the intended workflow, not an obstacle.
 - `build_phase2b_academic_graph()` — the academic branch. Consumes an **open** run
   that already carries a verified query plan, makes **no model call**, and
   deliberately leaves the run non-terminal so later branches can still write to it.
+- `build_phase2c_evidence_graph()` — trusted evidence extraction. One model call
+  per content snapshot; everything it returns is verified deterministically
+  against the snapshot text. Also leaves the run non-terminal.
 - The provider is injected per run via
   `config["configurable"]["structured_model_provider"]`, which is what keeps graph
   construction credential-free and tests deterministic.
@@ -182,6 +189,12 @@ no bearer scheme exists. Consensus's MCP server is a separate surface and is
 never a source for the REST contract. Never introduce an `Authorization: Bearer`
 header here without evidence from the REST documentation.
 
+`evals/evidence_extraction/v1/cases.jsonl` — 70 Gold cases. Each runs through
+the real Phase 2C graph with a scripted fake provider; the scorer re-derives
+every judgement from the snapshot text independently of the verifier, and
+negative controls prove each gate can fire. Six quality metrics must be exactly
+1.0, and eleven release-blocking metrics must be zero.
+
 The approved baseline (`evals/intake/baselines/v1.json`) is never overwritten
 automatically — `write_baseline(..., approve=True)` or `--approve-baseline` is
 required. Reports go to the git-ignored `eval_reports/`.
@@ -219,11 +232,13 @@ not obvious from the code.
 - `docs/phase2a1_hardening.md` — official hosts and currency, source identity, shared retry layer, multilingual planning
 - `docs/phase2a_execution_spec.md` — the reviewed Phase 2A execution specification
 - `docs/phase2b_academic_research_connectors.md` — academic connectors, identity resolution, merge policy, evals
-- `docs/adr/ADR-0{01..10}-*.md` — decisions and their rejected alternatives
+- `docs/phase2c_evidence_extraction.md` — content snapshots, verbatim verification, numeric fidelity, evidence evals
+- `docs/adr/ADR-0{01..13}-*.md` — decisions and their rejected alternatives
 
 ## Phase discipline
 
-Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A, 2A.1, 2B). Phase 2A
+Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A, 2A.1, 2B, 2B.1,
+2B.2, 2C). Phase 2A
 added the research foundation: `ResearchRun` on graph state (never in
 `ProjectState`), verified query planning, and official Mawhiba requirements
 retrieval (`build_phase2a_research_graph()`). Research planning must never write
@@ -239,9 +254,28 @@ comes from strong identifiers only and **never from a title** (ADR-009).
 Retrieval stops at `VERIFIED_METADATA`: no `EvidenceRecord`, no claim support, no
 source quality, no full text (ADR-010).
 
-The patent, product, open-source and standards connectors, evidence extraction,
-scoring engine, Red Team, report generation, PostgreSQL checkpointer and UI are
-**not implemented**. Do not start them without being asked.
+Phase 2C added trusted evidence extraction. Source content snapshots are built
+per provider observation from the paper's own abstract — never from a merged
+string, never from a title, a citation count, a provider rank or a Consensus
+`takeaway`. An LLM proposes candidates; deterministic code verifies them. The
+stored excerpt is always `snapshot.text[start:end]`, sliced by code, so
+*verbatim* holds by construction (ADR-011); model offsets are never trusted to
+locate text, and a repeated sentence is refused as `AMBIGUOUS_SPAN` rather than
+guessed. Numbers are re-checked against the verified excerpt, so 92.3% cannot
+become 93.2% and 5 ms cannot become 5 s.
+
+Extracted evidence lives on the `ResearchRun`, **not** in `ProjectState.evidence`:
+a canonical `EvidenceRecord` must reference a source inside `ProjectState.sources`,
+and verified academic sources deliberately live on the run (ADR-010). The
+research-layer type has no `support_direction`, no `strength` and no `claim_id`,
+so Phase 2C **cannot** express claim support even by accident (ADR-012). Evidence
+from an abstract stays `ABSTRACT_ONLY` and is never presented as full-text
+verified (ADR-013).
+
+Claim-evidence alignment, novelty analysis, the scoring engine, Red Team, report
+generation, the patent / product / open-source / standards connectors, full-text
+acquisition, the PostgreSQL checkpointer and the UI are **not implemented**. Do
+not start them without being asked.
 
 When a prior guarantee blocks new work, the answer is almost never to relax the
 guarantee — the guards in `test_workflow_hardening.py` and

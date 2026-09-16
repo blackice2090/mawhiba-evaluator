@@ -537,6 +537,23 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "GoldExpectedSource",
         "GoldPlannedQuery",
         "GoldProviderScript",
+        # Phase 2C evidence extraction configuration: per-process policy. The
+        # bounds a run actually applied are recorded on the extraction run.
+        "EvidenceExtractionSettings",
+        # Phase 2C model-facing DTOs. The untrusted boundary of the extraction
+        # call: validated inside the extractor, mapped to EvidenceCandidates and
+        # discarded. Only the canonical, verified form is persisted.
+        "CandidateEvidenceItem",
+        "CandidateNumericObservation",
+        "EvidenceExtraction",
+        # Phase 2C evidence extraction eval layer: offline measurement artifacts
+        # that run outside any evaluation and never touch a checkpoint.
+        "EvidenceExtractionMetrics",
+        "EvidenceGoldCase",
+        "EvidenceGoldDataset",
+        "GoldEvidenceExpectation",
+        "GoldObservation",
+        "GoldSource",
     }
 )
 """Types that legitimately never cross the checkpoint boundary.

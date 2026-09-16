@@ -15,6 +15,10 @@ from src.research.official.allowlist import (
 )
 from src.schemas.academic import ACADEMIC_PROVIDER_ORDER, AcademicProvider
 from src.schemas.common import MawhibaModel
+from src.schemas.evidence_extraction import (
+    MAX_EVIDENCE_EXCERPT_CHARS,
+    MIN_EVIDENCE_EXCERPT_CHARS,
+)
 from src.schemas.official import (
     MAX_COMPETITION_EDITION,
     MIN_COMPETITION_EDITION,
@@ -117,10 +121,51 @@ class AcademicSearchSettings(MawhibaModel):
         return self
 
 
+class EvidenceExtractionSettings(MawhibaModel):
+    """Phase 2C extraction policy.
+
+    Excerpt bounds are policy, not taste: a fragment too short to carry meaning
+    verifies trivially, and an unbounded passage is quotation rather than
+    evidence. Both are reviewable here rather than hard-coded in the verifier.
+    """
+
+    min_evidence_excerpt_chars: int = Field(
+        default=MIN_EVIDENCE_EXCERPT_CHARS, ge=1, le=1000
+    )
+    max_evidence_excerpt_chars: int = Field(
+        default=MAX_EVIDENCE_EXCERPT_CHARS, ge=50, le=20000
+    )
+    max_sources_per_run: int = Field(
+        default=25,
+        ge=1,
+        le=500,
+        description="Bounds how many verified sources one extraction pass calls "
+        "the model for. Every call is a cost and a third-party request.",
+    )
+    max_candidates_per_snapshot: int = Field(
+        default=12,
+        ge=1,
+        le=100,
+        description="A model returning fifty excerpts from one abstract is "
+        "over-extracting; the surplus is truncated and recorded.",
+    )
+
+    @model_validator(mode="after")
+    def _bounds_are_coherent(self) -> EvidenceExtractionSettings:
+        if self.max_evidence_excerpt_chars <= self.min_evidence_excerpt_chars:
+            raise ValueError(
+                "max_evidence_excerpt_chars must exceed min_evidence_excerpt_chars"
+            )
+        return self
+
+
 class ResearchSettings(MawhibaModel):
     limits: QueryPlanLimits = Field(default_factory=QueryPlanLimits)
     official: OfficialRequirementsSettings = Field(default_factory=OfficialRequirementsSettings)
     academic: AcademicSearchSettings = Field(default_factory=AcademicSearchSettings)
+    evidence: EvidenceExtractionSettings = Field(
+        default_factory=EvidenceExtractionSettings
+    )
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()
