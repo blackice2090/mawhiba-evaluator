@@ -17,9 +17,21 @@ from uuid import UUID, uuid4
 
 from pydantic import ConfigDict, Field, model_validator
 
-from src.schemas.common import MawhibaModel, ResearchBranch, UtcDatetime, utc_now
+from src.schemas.academic import AcademicRetrievalResult
+from src.schemas.common import (
+    MawhibaModel,
+    QueryPurpose,
+    ResearchBranch,
+    UtcDatetime,
+    utc_now,
+)
 from src.schemas.extraction import ModelFacingModel
 from src.schemas.official import OfficialRequirementsResult
+
+# ``QueryPurpose`` now lives in ``src.schemas.common``: the branch contracts that
+# need the vocabulary (academic retrieval first) cannot import this module,
+# because this module embeds their results. It is imported above so that every
+# existing ``from src.schemas.research import QueryPurpose`` keeps working.
 
 RESEARCH_CONTRACT_VERSION = "RESEARCH-CONTRACT-V1"
 
@@ -42,24 +54,6 @@ class ResearchRunStatus(StrEnum):
 TERMINAL_RESEARCH_RUN_STATUSES: frozenset[ResearchRunStatus] = frozenset(
     {ResearchRunStatus.PARTIAL, ResearchRunStatus.COMPLETED, ResearchRunStatus.FAILED}
 )
-
-
-class QueryPurpose(StrEnum):
-    PROBLEM = "PROBLEM"
-    EXISTING_SOLUTIONS = "EXISTING_SOLUTIONS"
-    TECHNOLOGY = "TECHNOLOGY"
-    RECENT_WORK = "RECENT_WORK"
-    LIMITATIONS = "LIMITATIONS"
-    BENCHMARK = "BENCHMARK"
-    REVIEW = "REVIEW"
-    ALTERNATIVES = "ALTERNATIVES"
-    FAILURE_MODES = "FAILURE_MODES"
-    COMPETING_METHODS = "COMPETING_METHODS"
-    PRIOR_ART = "PRIOR_ART"
-    PATENT_FUNCTION = "PATENT_FUNCTION"
-    PATENT_MECHANISM = "PATENT_MECHANISM"
-    PRODUCT = "PRODUCT"
-    OPEN_SOURCE = "OPEN_SOURCE"
 
 
 CHALLENGE_PURPOSES: frozenset[QueryPurpose] = frozenset(
@@ -270,6 +264,20 @@ class BranchExecutionCoverage(MawhibaModel):
     query_count: int = Field(default=0, ge=0)
     candidate_count: int = Field(default=0, ge=0)
     verified_source_count: int = Field(default=0, ge=0)
+    provider_success_count: int = Field(
+        default=0,
+        ge=0,
+        description="Provider executions that returned at least one usable record. "
+        "Counted per provider per query, so the same provider can appear more "
+        "than once in a multi-query branch.",
+    )
+    provider_failure_count: int = Field(default=0, ge=0)
+    provider_empty_count: int = Field(
+        default=0,
+        ge=0,
+        description="Provider executions that answered with no records. An empty "
+        "result is not a failure.",
+    )
     failure_reason: str | None = None
     note: str | None = None
 
@@ -322,6 +330,12 @@ class ResearchRun(MawhibaModel):
     query_plan: VerifiedQueryPlan | None = None
     branch_coverage: list[BranchExecutionCoverage] = Field(default_factory=list)
     official_requirements: OfficialRequirementsResult | None = None
+    academic_research: AcademicRetrievalResult | None = Field(
+        default=None,
+        description="Phase 2B ACADEMIC branch result. On the run, never in "
+        "ProjectState: retrieval reads canonical state through the verified "
+        "query plan and writes none of it (ADR-006, ADR-010).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -346,6 +360,11 @@ class ResearchRun(MawhibaModel):
                 raise ValueError("query_plan belongs to a different research run")
             if any(q.research_run_id != self.research_run_id for q in self.query_plan.queries):
                 raise ValueError("a query belongs to a different research run")
+        if (
+            self.academic_research is not None
+            and self.academic_research.research_run_id != self.research_run_id
+        ):
+            raise ValueError("academic_research belongs to a different research run")
         return self
 
     @property
@@ -361,6 +380,16 @@ class ResearchRun(MawhibaModel):
         return bool(
             self.official_requirements
             and self.official_requirements.official_requirements_checked
+        )
+
+    @property
+    def academic_retrieval_ran(self) -> bool:
+        """True once the ACADEMIC branch executed, whatever it found."""
+        from src.schemas.academic import AcademicBranchOutcome
+
+        return bool(
+            self.academic_research
+            and self.academic_research.outcome is not AcademicBranchOutcome.NOT_RUN
         )
 
     def coverage_for(self, branch: ResearchBranch) -> BranchExecutionCoverage | None:

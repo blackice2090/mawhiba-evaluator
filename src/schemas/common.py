@@ -350,6 +350,32 @@ class ResearchBranch(StrEnum):
         return None
 
 
+class QueryPurpose(StrEnum):
+    """Why the system intends to search (N05).
+
+    Lives beside ``ResearchBranch`` rather than in ``src/schemas/research.py``
+    because the branch contracts of later phases -- academic retrieval first --
+    need the vocabulary without importing the research run that embeds them.
+    ``src.schemas.research`` re-exports it, so every existing import still works.
+    """
+
+    PROBLEM = "PROBLEM"
+    EXISTING_SOLUTIONS = "EXISTING_SOLUTIONS"
+    TECHNOLOGY = "TECHNOLOGY"
+    RECENT_WORK = "RECENT_WORK"
+    LIMITATIONS = "LIMITATIONS"
+    BENCHMARK = "BENCHMARK"
+    REVIEW = "REVIEW"
+    ALTERNATIVES = "ALTERNATIVES"
+    FAILURE_MODES = "FAILURE_MODES"
+    COMPETING_METHODS = "COMPETING_METHODS"
+    PRIOR_ART = "PRIOR_ART"
+    PATENT_FUNCTION = "PATENT_FUNCTION"
+    PATENT_MECHANISM = "PATENT_MECHANISM"
+    PRODUCT = "PRODUCT"
+    OPEN_SOURCE = "OPEN_SOURCE"
+
+
 class BranchStatus(StrEnum):
     """Coverage state of a research branch (27)."""
 
