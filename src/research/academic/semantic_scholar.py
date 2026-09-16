@@ -61,10 +61,39 @@ SEMANTIC_SCHOLAR_CONNECTOR_VERSION = "SEMANTIC-SCHOLAR-CONNECTOR-V1"
 SEMANTIC_SCHOLAR_BASE_URL = "https://api.semanticscholar.org/graph/v1"
 SEMANTIC_SCHOLAR_SEARCH_PATH = "paper/search"
 
-SEMANTIC_SCHOLAR_FIELDS = (
-    "paperId,externalIds,title,abstract,authors,year,venue,publicationVenue,"
-    "publicationTypes,publicationDate,citationCount,url,isOpenAccess"
+SEMANTIC_SCHOLAR_API_KEY_HEADER = "x-api-key"
+SEMANTIC_SCHOLAR_QUERY_PARAM = "query"
+SEMANTIC_SCHOLAR_LIMIT_PARAM = "limit"
+SEMANTIC_SCHOLAR_FIELDS_PARAM = "fields"
+SEMANTIC_SCHOLAR_MAX_LIMIT = 100
+"""Documented ceiling for the relevance-search endpoint (limit + offset <= 1000,
+limit <= 100). Bulk search is a different endpoint and is not used here."""
+
+SEMANTIC_SCHOLAR_CONTRACT_REVIEWED_ON = "2026-09-16"
+
+SEMANTIC_SCHOLAR_FIELD_NAMES: tuple[str, ...] = (
+    "paperId",
+    "externalIds",
+    "title",
+    "abstract",
+    "authors",
+    "year",
+    "venue",
+    "publicationVenue",
+    "publicationTypes",
+    "publicationDate",
+    "citationCount",
+    "url",
+    "isOpenAccess",
 )
+"""Exactly the fields this connector's parser reads, and nothing more.
+
+Every name is a documented paper field. Requesting more than is parsed slows the
+response for no benefit, and requesting a field the parser ignores would make the
+request contract and the DTO drift apart -- a test asserts they agree.
+"""
+
+SEMANTIC_SCHOLAR_FIELDS = ",".join(SEMANTIC_SCHOLAR_FIELD_NAMES)
 
 SEMANTIC_SCHOLAR_TYPES: dict[str, AcademicSourceType] = {
     "metaanalysis": AcademicSourceType.META_ANALYSIS,
@@ -319,7 +348,11 @@ class SemanticScholarProvider(BaseAcademicProvider):
             base_url,
             client=client,
             timeout_seconds=timeout_seconds,
-            headers={"x-api-key": self._api_key} if self._api_key else {},
+            headers=(
+                {SEMANTIC_SCHOLAR_API_KEY_HEADER: self._api_key}
+                if self._api_key
+                else {}
+            ),
         )
 
     @property
@@ -330,7 +363,11 @@ class SemanticScholarProvider(BaseAcademicProvider):
     def _fetch(self, query: AcademicSearchQuery, limit: int) -> Any:
         return self._http.get_json(
             SEMANTIC_SCHOLAR_SEARCH_PATH,
-            {"query": query.query, "limit": limit, "fields": SEMANTIC_SCHOLAR_FIELDS},
+            {
+                SEMANTIC_SCHOLAR_QUERY_PARAM: query.query,
+                SEMANTIC_SCHOLAR_LIMIT_PARAM: min(limit, SEMANTIC_SCHOLAR_MAX_LIMIT),
+                SEMANTIC_SCHOLAR_FIELDS_PARAM: SEMANTIC_SCHOLAR_FIELDS,
+            },
         )
 
     def _normalize(
@@ -342,7 +379,14 @@ class SemanticScholarProvider(BaseAcademicProvider):
 
 
 __all__ = [
+    "SEMANTIC_SCHOLAR_API_KEY_HEADER",
     "SEMANTIC_SCHOLAR_BASE_URL",
+    "SEMANTIC_SCHOLAR_CONTRACT_REVIEWED_ON",
+    "SEMANTIC_SCHOLAR_FIELDS_PARAM",
+    "SEMANTIC_SCHOLAR_FIELD_NAMES",
+    "SEMANTIC_SCHOLAR_LIMIT_PARAM",
+    "SEMANTIC_SCHOLAR_MAX_LIMIT",
+    "SEMANTIC_SCHOLAR_QUERY_PARAM",
     "SEMANTIC_SCHOLAR_CONNECTOR_VERSION",
     "SEMANTIC_SCHOLAR_FIELDS",
     "SEMANTIC_SCHOLAR_SEARCH_PATH",

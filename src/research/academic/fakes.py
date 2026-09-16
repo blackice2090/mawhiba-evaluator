@@ -137,7 +137,7 @@ class _FakeAcademicProvider(BaseAcademicProvider):
 class FakeConsensusProvider(_FakeAcademicProvider):
     provider_name: ClassVar[AcademicProvider] = AcademicProvider.CONSENSUS
     connector_version: ClassVar[str] = CONSENSUS_CONNECTOR_VERSION
-    envelope_key: ClassVar[str] = "papers"
+    envelope_key: ClassVar[str] = "results"
 
     def _normalize(
         self, query: AcademicSearchQuery, payload: Any, retrieved_at: datetime

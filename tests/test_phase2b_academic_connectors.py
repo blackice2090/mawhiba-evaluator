@@ -617,11 +617,20 @@ def test_a_missing_consensus_key_is_an_auth_error_that_names_no_secret(
 
 
 def test_openalex_needs_no_credential(monkeypatch) -> None:
+    """OpenAlex is keyless. A key exists upstream but is optional and unused here.
+
+    Phase 2B.1 corrected this: the provider *does* document an optional
+    ``api_key`` that raises the rate limits, so the capability names the
+    environment variable. What matters -- and what is asserted -- is that the
+    connector is fully usable with no credential configured at all.
+    """
     for name in ACADEMIC_CREDENTIAL_ENV_VARS:
         monkeypatch.delenv(name, raising=False)
-    assert PROVIDER_CAPABILITIES[AcademicProvider.OPENALEX].api_key_required is False
-    assert PROVIDER_CAPABILITIES[AcademicProvider.OPENALEX].api_key_env is None
-    assert OpenAlexProvider(client=object()) is not None
+    capability = PROVIDER_CAPABILITIES[AcademicProvider.OPENALEX]
+    assert capability.api_key_required is False
+    assert capability.auth_header is None, "OpenAlex authenticates by query parameter"
+    provider = OpenAlexProvider(client=object())
+    assert provider.has_credentials is False
     assert read_api_key(CONSENSUS_API_KEY_ENV) is None
 
 

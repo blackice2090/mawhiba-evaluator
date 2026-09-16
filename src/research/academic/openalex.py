@@ -12,6 +12,11 @@ Two OpenAlex specifics are worth naming:
 * **Retraction is explicit.** ``is_retracted`` is a real boolean, so this is the
   one provider that can answer the retraction question with ``False`` rather
   than leaving it unknown.
+
+The request contract (`/works`, `search`, `per_page`, optional `api_key` and
+`mailto`, envelope `{meta, results}`) was checked against the published API
+reference and against a live keyless call; see the contract table in
+`docs/phase2b_academic_research_connectors.md`.
 """
 
 from __future__ import annotations
@@ -22,7 +27,11 @@ from typing import Any, ClassVar
 from pydantic import AliasChoices, Field, ValidationError
 
 from src.research.academic.client import JsonHttpClient
-from src.research.academic.credentials import read_contact_email
+from src.research.academic.credentials import (
+    OPENALEX_API_KEY_ENV,
+    read_api_key,
+    read_contact_email,
+)
 from src.research.academic.http import DEFAULT_RETRY_POLICY, RetryPolicy, Sleeper
 from src.research.academic.identifiers import (
     doi_url,
@@ -55,9 +64,21 @@ from src.schemas.academic import (
     ProviderFacingModel,
 )
 
-OPENALEX_CONNECTOR_VERSION = "OPENALEX-CONNECTOR-V1"
+OPENALEX_CONNECTOR_VERSION = "OPENALEX-CONNECTOR-V2"
 OPENALEX_BASE_URL = "https://api.openalex.org"
 OPENALEX_SEARCH_PATH = "works"
+
+OPENALEX_QUERY_PARAM = "search"
+OPENALEX_PAGE_SIZE_PARAM = "per_page"
+"""The documented spelling. ``per-page`` is a legacy alias the API still accepts;
+sending an undocumented spelling is a dependency on behaviour nobody promised,
+so the connector sends the documented one and a contract test pins it."""
+
+OPENALEX_API_KEY_PARAM = "api_key"
+OPENALEX_MAILTO_PARAM = "mailto"
+OPENALEX_MAX_PAGE_SIZE = 100
+
+OPENALEX_CONTRACT_REVIEWED_ON = "2026-09-16"
 
 OPENALEX_WORK_TYPES: dict[str, AcademicSourceType] = {
     "article": AcademicSourceType.JOURNAL_ARTICLE,
@@ -320,12 +341,28 @@ class OpenAlexProvider(BaseAcademicProvider):
         # A contact address is configuration, not a credential: OpenAlex uses it
         # to route requests to its polite pool.
         self._contact_email = read_contact_email()
+        # Optional: the free tier is keyless, and a key only raises the limits.
+        self._api_key = read_api_key(OPENALEX_API_KEY_ENV)
         self._http = JsonHttpClient(base_url, client=client, timeout_seconds=timeout_seconds)
 
+    @property
+    def has_credentials(self) -> bool:
+        """Whether a key is configured. Never exposes the key itself."""
+        return self._api_key is not None
+
     def _fetch(self, query: AcademicSearchQuery, limit: int) -> Any:
-        params: dict[str, Any] = {"search": query.query, "per-page": limit}
+        params: dict[str, Any] = {
+            OPENALEX_QUERY_PARAM: query.query,
+            OPENALEX_PAGE_SIZE_PARAM: min(limit, OPENALEX_MAX_PAGE_SIZE),
+        }
         if self._contact_email:
-            params["mailto"] = self._contact_email
+            params[OPENALEX_MAILTO_PARAM] = self._contact_email
+        if self._api_key:
+            # OpenAlex takes its key as a query parameter, so the credential is
+            # in the URL. Nothing here logs, stores or echoes a request URL --
+            # error messages are built from the status code alone, and only
+            # response bodies reach raw_provider_metadata.
+            params[OPENALEX_API_KEY_PARAM] = self._api_key
         return self._http.get_json(OPENALEX_SEARCH_PATH, params)
 
     def _normalize(
@@ -336,7 +373,13 @@ class OpenAlexProvider(BaseAcademicProvider):
 
 __all__ = [
     "MAX_ABSTRACT_WORDS",
+    "OPENALEX_API_KEY_PARAM",
     "OPENALEX_BASE_URL",
+    "OPENALEX_CONTRACT_REVIEWED_ON",
+    "OPENALEX_MAILTO_PARAM",
+    "OPENALEX_MAX_PAGE_SIZE",
+    "OPENALEX_PAGE_SIZE_PARAM",
+    "OPENALEX_QUERY_PARAM",
     "OPENALEX_CONNECTOR_VERSION",
     "OPENALEX_SEARCH_PATH",
     "OPENALEX_WORK_TYPES",

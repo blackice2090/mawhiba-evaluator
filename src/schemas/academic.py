@@ -230,9 +230,11 @@ class AcademicErrorKind(StrEnum):
     RATE_LIMITED = "RATE_LIMITED"
     SERVER_ERROR = "SERVER_ERROR"
     AUTH_ERROR = "AUTH_ERROR"
+    PAYMENT_REQUIRED = "PAYMENT_REQUIRED"
     FORBIDDEN = "FORBIDDEN"
     NOT_FOUND = "NOT_FOUND"
     BAD_REQUEST = "BAD_REQUEST"
+    UNPROCESSABLE_REQUEST = "UNPROCESSABLE_REQUEST"
     INVALID_RESPONSE = "INVALID_RESPONSE"
     SCHEMA_INCOMPATIBLE = "SCHEMA_INCOMPATIBLE"
     UNEXPECTED = "UNEXPECTED"
@@ -247,8 +249,12 @@ RETRYABLE_ERROR_KINDS: frozenset[AcademicErrorKind] = frozenset(
     }
 )
 """Transport faults and explicit back-pressure. Everything else is a contract
-problem that a second identical request cannot fix -- 403 included, because a
-provider that documents it as transient would need its own reviewed decision."""
+problem that a second identical request cannot fix -- 403, 402 and 422 included.
+
+403 stays non-retryable because a provider that documents it as transient would
+need its own reviewed decision. 402 (payment/quota) and 422 (unprocessable
+request) are non-retryable for the same reason a 400 is: repeating an identical
+request cannot change an account state or a malformed query."""
 
 ERROR_KIND_TO_SEARCH_STATUS: dict[AcademicErrorKind, AcademicSearchStatus] = {
     AcademicErrorKind.TIMEOUT: AcademicSearchStatus.TIMEOUT,
@@ -256,9 +262,15 @@ ERROR_KIND_TO_SEARCH_STATUS: dict[AcademicErrorKind, AcademicSearchStatus] = {
     AcademicErrorKind.RATE_LIMITED: AcademicSearchStatus.RATE_LIMITED,
     AcademicErrorKind.SERVER_ERROR: AcademicSearchStatus.PROVIDER_ERROR,
     AcademicErrorKind.AUTH_ERROR: AcademicSearchStatus.AUTH_ERROR,
+    # 402 is an account state, not a transport fault: the key may be valid and
+    # the quota spent. It groups with AUTH_ERROR because the branch-level fact
+    # is the same -- this provider cannot be used with these credentials -- while
+    # the kind keeps the two distinguishable.
+    AcademicErrorKind.PAYMENT_REQUIRED: AcademicSearchStatus.AUTH_ERROR,
     AcademicErrorKind.FORBIDDEN: AcademicSearchStatus.AUTH_ERROR,
     AcademicErrorKind.NOT_FOUND: AcademicSearchStatus.PROVIDER_ERROR,
     AcademicErrorKind.BAD_REQUEST: AcademicSearchStatus.PROVIDER_ERROR,
+    AcademicErrorKind.UNPROCESSABLE_REQUEST: AcademicSearchStatus.PROVIDER_ERROR,
     AcademicErrorKind.INVALID_RESPONSE: AcademicSearchStatus.INVALID_RESPONSE,
     AcademicErrorKind.SCHEMA_INCOMPATIBLE: AcademicSearchStatus.INVALID_RESPONSE,
     AcademicErrorKind.UNEXPECTED: AcademicSearchStatus.PROVIDER_ERROR,

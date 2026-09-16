@@ -4,7 +4,9 @@
 **Scope:** Consensus, OpenAlex and Semantic Scholar connectors; academic query
 eligibility and budgets; deterministic normalization, verification,
 cross-provider identity resolution and conservative merging; the academic branch
-graph; coverage; and a 50-case Gold evaluation.
+graph; coverage; and a 51-case Gold evaluation.
+**Amended by Phase 2B.1:** provider API contract verification and hardening
+(section 2a).
 **Prior phases:** `docs/phase2a_research_foundation.md`, `docs/phase2a1_hardening.md`
 **Decision records:** ADR-008 (provider isolation), ADR-009 (logical source vs
 provider observation), ADR-010 (academic retrieval is not evidence). ADR-006 and
@@ -121,6 +123,68 @@ in the system.
 
 ---
 
+## 2a. Provider contract table
+
+Reviewed against the providers' own documentation on **2026-09-16** (Phase 2B.1).
+The connector constants are the single source of truth; `ProviderCapability`
+reads them rather than restating them, and
+`tests/test_academic_provider_contracts.py` asserts that the request a connector
+actually builds matches this table.
+
+| | Consensus | OpenAlex | Semantic Scholar |
+|---|---|---|---|
+| Base URL | `https://api.consensus.app` | `https://api.openalex.org` | `https://api.semanticscholar.org/graph/v1` |
+| Endpoint | `/v1/search` | `/works` | `/paper/search` |
+| Method | `GET` | `GET` | `GET` |
+| Authentication | `x-api-key` header, **required** | `api_key` query parameter, **optional** | `x-api-key` header, **optional** |
+| Required parameter | `query` | `search` | `query` |
+| Result-limit parameter | `page_size` | `per_page` | `limit` |
+| Documented max | 1000 per query | 100 | 100 |
+| Response envelope | `results` (+ `page`, `page_size`, `is_end`, `next_page`) | `{meta, results}` | `{total, offset, next, data}` |
+| Other parameters sent | -- | `mailto` (polite pool, optional) | `fields` |
+| Contract reviewed | 2026-09-16 | 2026-09-16 | 2026-09-16 |
+
+### What Phase 2B.1 corrected
+
+| Provider | Phase 2B sent | Verified contract | Impact |
+|---|---|---|---|
+| Consensus | `GET /v1/search/papers`, `size`, `X-API-Key` | `GET /v1/search`, `page_size`, `x-api-key` | **Blocking.** The path did not exist, so every live Consensus call would have failed. |
+| Consensus | `year`, `journal`, `consensus_summary` | `publish_year`, `journal_name`, `takeaway` | Live records would have parsed with a missing year and venue. The old spellings are kept as tolerated aliases. |
+| OpenAlex | `per-page` | `per_page` | Not broken -- `per-page` is still accepted as a legacy alias -- but undocumented, so the connector now sends the documented spelling. |
+| OpenAlex | no key mechanism | optional `api_key` query parameter | The free tier stays keyless; a key is now supported and raises the limits. |
+| Semantic Scholar | `/graph/v1/paper/search`, `query`, `limit`, `fields`, `x-api-key` | identical | **No change.** The audit confirmed the implementation. |
+
+Verification method: the OpenAlex contract was confirmed against the published
+API reference **and** against a live keyless call
+(`/works?search=...&per_page=2` returned `{meta, results}` with
+`meta.per_page == 2`). The Consensus and Semantic Scholar contracts were
+confirmed against the providers' published documentation; `docs.consensus.app`
+is not publicly fetchable, so the Consensus request contract comes from the
+provider's own published API repository together with the documented endpoint
+description.
+
+### HTTP status semantics
+
+| Status | Kind | Retried | Branch status |
+|---|---|---|---|
+| 400 | `BAD_REQUEST` | no | `PROVIDER_ERROR` |
+| 401 | `AUTH_ERROR` | no | `AUTH_ERROR` |
+| 402 | `PAYMENT_REQUIRED` | no | `AUTH_ERROR` |
+| 403 | `FORBIDDEN` | no | `AUTH_ERROR` |
+| 404 | `NOT_FOUND` | no | `PROVIDER_ERROR` |
+| 422 | `UNPROCESSABLE_REQUEST` | no | `PROVIDER_ERROR` |
+| 429 | `RATE_LIMITED` | yes, to the bound, honouring `Retry-After` | `RATE_LIMITED` |
+| 5xx | `SERVER_ERROR` | yes, to the bound | `PROVIDER_ERROR` |
+
+402 and 401 are deliberately distinct **kinds** while sharing a branch status: a
+spent quota and a rejected key are different operational facts, and both mean
+the provider cannot be used right now. The 402 and 422 mappings are this
+project's defensive handling rather than a quoted provider error table -- neither
+provider publishes one publicly -- so they are conservative: both are
+non-retryable.
+
+---
+
 ## 3. Query eligibility
 
 Academic connectors execute only **accepted** entries of the Phase 2A verified
@@ -225,10 +289,18 @@ passing.
 ## 6. Credentials
 
 ```text
-CONSENSUS_API_KEY           required by the Consensus connector
+CONSENSUS_API_KEY           required by the Consensus connector (x-api-key header)
 SEMANTIC_SCHOLAR_API_KEY    optional; the public endpoint works without one
+OPENALEX_API_KEY            optional; raises the OpenAlex limits (api_key parameter)
 OPENALEX_CONTACT_EMAIL      optional, not a secret (OpenAlex polite pool)
 ```
+
+OpenAlex is the one provider whose documented mechanism puts the credential in
+the URL. That is honoured because it is the provider's contract, and it is safe
+here for a specific reason: nothing in this project logs, stores or echoes a
+request URL. Error messages are composed from the status code alone, and only
+response bodies reach `raw_provider_metadata`. A contract test asserts the key
+never reaches the stored result.
 
 Keys are read from the process environment when a live connector is constructed
 and held in a private attribute. Nothing stores a key in a settings model, on
@@ -542,7 +614,7 @@ outcome, no source count, no node path, no coverage counter and no byte of
 ## 21. Evals
 
 ```text
-evals/academic_retrieval/v1/cases.jsonl     50 Gold cases
+evals/academic_retrieval/v1/cases.jsonl     51 Gold cases
 evals/academic_retrieval/v1/schema.md       the case contract
 src/evals/academic/{dataset,metrics,runner,cli}.py
 ```
@@ -561,14 +633,14 @@ traceability from the produced state rather than asking the deduplicator whether
 it deduplicated correctly. That independence is what lets the negative controls
 prove the eval can fail.
 
-Coverage: 50 cases (47 en, 2 ar, 1 mixed) over cross-provider dedup, DOI
+Coverage: 51 cases (48 en, 2 ar, 1 mixed) over cross-provider dedup, DOI
 formatting, title-is-not-identity, missing DOI, provider-only identifiers,
 preprints, reviews, conference papers, unknown types, retractions and unknown
 retraction, conflicting years / titles / venues / open-access flags, citation
 disagreement, empty results, timeout, rate limit, auth failure, total outage,
 malformed records and envelopes, within-provider duplicates, PII contamination,
 prompt injection, Arabic and mixed-language queries, budget truncation, result
-limits, and the three standing safety gates.
+limits, provider field aliases, and the three standing safety gates.
 
 Metrics (numerator/denominator, `None` when unmeasured):
 
@@ -611,7 +683,11 @@ RUN_SEMANTIC_SCHOLAR_TESTS=1
 
 Each provider has its own flag and is skipped unless that flag is `1`. Having
 credentials is deliberately not enough, and network access is deliberately not
-enough. Live assertions are structural only — the request is accepted, the
+enough. The converse also holds: a flag alone does not start a test that needs a
+credential. With `RUN_CONSENSUS_TESTS=1` and no `CONSENSUS_API_KEY`, the
+Consensus test **skips** -- a connector answering `AUTH_ERROR` satisfies every
+structural assertion, so passing it would report a provider as verified when it
+was never contacted. Live assertions are structural only — the request is accepted, the
 response parses, and whatever comes back obeys this project's contracts — so
 they never become a Gold baseline and CI never depends on a third-party service.
 
@@ -631,8 +707,8 @@ reproducible:
 ACADEMIC-CONTRACT-V1              contract_version
 ACADEMIC-NORMALIZER-V1            normalizer_version
 ACADEMIC-DEDUP-V1                 dedup_version
-CONSENSUS-CONNECTOR-V1            connector_versions[CONSENSUS]
-OPENALEX-CONNECTOR-V1             connector_versions[OPENALEX]
+CONSENSUS-CONNECTOR-V2            connector_versions[CONSENSUS]
+OPENALEX-CONNECTOR-V2             connector_versions[OPENALEX]
 SEMANTIC-SCHOLAR-CONNECTOR-V1     connector_versions[SEMANTIC_SCHOLAR]
 ```
 
@@ -719,7 +795,16 @@ no source quality, no tier assignment
    unknown fields, but a provider renaming a field this project reads would
    surface as `INVALID_RESPONSE` rather than as a silent gap — which is the
    intended direction, and is why `raw_provider_metadata` is preserved.
-10. **Arabic matching stays exact**, inherited from Phase 2A.1: no alef/ya
+   Contracts were reviewed on 2026-09-16 and carry that date; they are not
+   self-checking and will need re-review.
+10. **The Consensus and Semantic Scholar response schemas are documented, not
+    observed.** Only OpenAlex has been exercised against the live API from this
+    environment. A response differing from its published schema would surface as
+    rejected records with named reasons rather than as bad data, but it has not
+    been proven end to end.
+11. **The 402 and 422 mappings are defensive**, not quoted from a provider error
+    table; neither provider publishes one publicly.
+12. **Arabic matching stays exact**, inherited from Phase 2A.1: no alef/ya
     normalization and no diacritic folding, in line with the no-fuzzy-matching
     rule.
 

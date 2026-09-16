@@ -159,7 +159,7 @@ Four release-blocking safety metrics, all currently at zero violations:
 `unsupported_known_acceptance`, `invalid_provenance_acceptance`,
 `student_claim_leakage`, `prompt_injection_mutation`.
 
-`evals/academic_retrieval/v1/cases.jsonl` — 50 Gold cases, schema in
+`evals/academic_retrieval/v1/cases.jsonl` — 51 Gold cases, schema in
 `evals/academic_retrieval/v1/schema.md`. Each case is driven through the real
 Phase 2B graph with deterministic fakes; the scorer re-derives identity
 conflicts, provenance and traceability independently of the code it scores, and
@@ -168,6 +168,13 @@ at zero: `pii_leakage_rate`, `project_state_mutation_rate`,
 `evidence_creation_violation_rate`, `claim_mutation_violation_rate`,
 `untraceable_verified_source`, `invalid_strong_identifier_merge`,
 `provider_provenance_loss`.
+
+Phase 2B.1 pinned the three providers' request contracts.
+`tests/test_academic_provider_contracts.py` asserts the **exact** outgoing URL
+and parameters for each connector, with a negative assertion naming every stale
+value that must never return (`search/papers`, `size`, `per-page`). The
+contract table is section 2a of the Phase 2B doc, and `ProviderCapability` reads
+the connector constants rather than restating them, so the table cannot drift.
 
 The approved baseline (`evals/intake/baselines/v1.json`) is never overwritten
 automatically — `write_baseline(..., approve=True)` or `--approve-baseline` is

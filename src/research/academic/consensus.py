@@ -58,9 +58,20 @@ from src.schemas.academic import (
     ProviderFacingModel,
 )
 
-CONSENSUS_CONNECTOR_VERSION = "CONSENSUS-CONNECTOR-V1"
-CONSENSUS_BASE_URL = "https://api.consensus.app/v1"
-CONSENSUS_SEARCH_PATH = "search/papers"
+CONSENSUS_CONNECTOR_VERSION = "CONSENSUS-CONNECTOR-V2"
+CONSENSUS_BASE_URL = "https://api.consensus.app"
+CONSENSUS_SEARCH_PATH = "v1/search"
+"""The current search endpoint. ``v1/quick_search`` is deprecated upstream
+(removal announced for 2027-02-07) and is deliberately not used."""
+
+CONSENSUS_API_KEY_HEADER = "x-api-key"
+CONSENSUS_QUERY_PARAM = "query"
+CONSENSUS_PAGE_SIZE_PARAM = "page_size"
+CONSENSUS_MAX_PAGE_SIZE = 1000
+"""Documented ceiling per query. The budget is far below it; this only stops a
+misconfiguration from asking for more than the API accepts."""
+
+CONSENSUS_CONTRACT_REVIEWED_ON = "2026-09-16"
 
 CONSENSUS_STUDY_TYPES: dict[str, AcademicSourceType] = {
     "systematic review": AcademicSourceType.SYSTEMATIC_REVIEW,
@@ -104,10 +115,13 @@ class ConsensusPaper(ProviderFacingModel):
     title: str | None = None
     abstract: str | None = None
     authors: list[Any] = Field(default_factory=list)
-    year: Any = None
+    publish_year: Any = Field(
+        default=None, validation_alias=AliasChoices("publish_year", "year")
+    )
     publication_date: Any = None
-    journal: str | None = Field(
-        default=None, validation_alias=AliasChoices("journal", "venue")
+    journal_name: str | None = Field(
+        default=None,
+        validation_alias=AliasChoices("journal_name", "journal", "venue"),
     )
     publisher: str | None = None
     doi: str | None = None
@@ -120,21 +134,32 @@ class ConsensusPaper(ProviderFacingModel):
     study_type: str | None = None
     publication_type: str | None = None
     relevance_score: Any = None
-    consensus_summary: str | None = Field(
+    takeaway: str | None = Field(
         default=None,
-        validation_alias=AliasChoices("consensus_summary", "claim", "summary"),
-        description="Provider-generated text. Secondary metadata, never the "
-        "paper's abstract and never evidence.",
+        validation_alias=AliasChoices("takeaway", "consensus_summary", "claim", "summary"),
+        description="Consensus's own one-line synthesis of the paper. "
+        "Provider-generated secondary metadata: never the paper's abstract, "
+        "never the paper's own words, and never evidence (ADR-010).",
     )
 
 
 class ConsensusSearchResponse(ProviderFacingModel):
-    """The envelope. Records stay raw so each one can be validated on its own."""
+    """The envelope. Records stay raw so each one can be validated on its own.
 
-    papers: list[Any] = Field(
+    ``results`` is the documented field; the other spellings are tolerated
+    aliases rather than assumptions, so a rename upstream degrades to an empty
+    page instead of a crash. Pagination fields are declared because the response
+    echoes them; Phase 2B requests a single page and does not follow ``next_page``.
+    """
+
+    results: list[Any] = Field(
         default_factory=list,
-        validation_alias=AliasChoices("papers", "results", "data"),
+        validation_alias=AliasChoices("results", "papers", "data"),
     )
+    page: Any = None
+    page_size: Any = None
+    is_end: Any = None
+    next_page: Any = None
 
 
 # ---------------------------------------------------------------------------
@@ -177,8 +202,8 @@ def normalize_consensus_response(
             ],
         )
 
-    response = NormalizedResponse(raw_count=len(envelope.papers))
-    for rank, record in enumerate(envelope.papers):
+    response = NormalizedResponse(raw_count=len(envelope.results))
+    for rank, record in enumerate(envelope.results):
         try:
             paper = ConsensusPaper.model_validate(record)
         except ValidationError:
@@ -205,7 +230,7 @@ def normalize_consensus_response(
             )
             continue
 
-        year, bad_year = clean_year(paper.year)
+        year, bad_year = clean_year(paper.publish_year)
         if bad_year:
             response.rejected.append(
                 rejection(
@@ -252,7 +277,7 @@ def normalize_consensus_response(
                 authors=clean_authors(paper.authors),
                 publication_year=year,
                 publication_date=clean_date(paper.publication_date),
-                venue=clean_text(paper.journal),
+                venue=clean_text(paper.journal_name),
                 publisher=clean_text(paper.publisher),
                 identifiers=identifiers,
                 canonical_url=doi_url(identifiers.doi) if identifiers.doi else url.value,
@@ -305,7 +330,7 @@ class ConsensusProvider(BaseAcademicProvider):
             base_url,
             client=client,
             timeout_seconds=timeout_seconds,
-            headers={"X-API-Key": self._api_key} if self._api_key else {},
+            headers={CONSENSUS_API_KEY_HEADER: self._api_key} if self._api_key else {},
         )
 
     @property
@@ -320,7 +345,11 @@ class ConsensusProvider(BaseAcademicProvider):
                 f"{CONSENSUS_API_KEY_ENV} is not configured",
             )
         return self._http.get_json(
-            CONSENSUS_SEARCH_PATH, {"query": query.query, "size": limit}
+            CONSENSUS_SEARCH_PATH,
+            {
+                CONSENSUS_QUERY_PARAM: query.query,
+                CONSENSUS_PAGE_SIZE_PARAM: min(limit, CONSENSUS_MAX_PAGE_SIZE),
+            },
         )
 
     def _normalize(
@@ -330,7 +359,12 @@ class ConsensusProvider(BaseAcademicProvider):
 
 
 __all__ = [
+    "CONSENSUS_API_KEY_HEADER",
     "CONSENSUS_BASE_URL",
+    "CONSENSUS_CONTRACT_REVIEWED_ON",
+    "CONSENSUS_MAX_PAGE_SIZE",
+    "CONSENSUS_PAGE_SIZE_PARAM",
+    "CONSENSUS_QUERY_PARAM",
     "CONSENSUS_CONNECTOR_VERSION",
     "CONSENSUS_SEARCH_PATH",
     "ConsensusPaper",

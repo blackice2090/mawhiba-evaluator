@@ -13,6 +13,12 @@ Assertions are structural only -- that the request is accepted, that the
 response parses, and that whatever comes back obeys this project's contracts.
 Nothing here depends on which papers a provider returns today, so these tests
 are never a Gold baseline and CI never depends on a third-party service.
+
+A flag alone is not enough for a provider that requires a credential. If
+``RUN_CONSENSUS_TESTS=1`` is set but ``CONSENSUS_API_KEY`` is absent, the test
+**skips** rather than passing: a connector that returns ``AUTH_ERROR`` obeys
+every contract in this file, so letting it pass would report a provider as
+verified when it was never contacted.
 """
 
 from __future__ import annotations
@@ -26,10 +32,12 @@ from src.research.academic.consensus import ConsensusProvider
 from src.research.academic.credentials import (
     CONSENSUS_API_KEY_ENV,
     SEMANTIC_SCHOLAR_API_KEY_ENV,
+    has_api_key,
 )
 from src.research.academic.openalex import OpenAlexProvider
 from src.research.academic.semantic_scholar import SemanticScholarProvider
 from src.schemas.academic import (
+    EXECUTED_SEARCH_STATUSES,
     AcademicProvider,
     AcademicSearchQuery,
     AcademicSearchResult,
@@ -43,6 +51,9 @@ LIVE_QUERY = "convolutional neural network plant disease detection"
 RUN_CONSENSUS = os.getenv("RUN_CONSENSUS_TESTS") == "1"
 RUN_OPENALEX = os.getenv("RUN_OPENALEX_TESTS") == "1"
 RUN_SEMANTIC_SCHOLAR = os.getenv("RUN_SEMANTIC_SCHOLAR_TESTS") == "1"
+
+CONSENSUS_READY = RUN_CONSENSUS and has_api_key(CONSENSUS_API_KEY_ENV)
+"""Consensus requires a key, so an opted-in run without one is NOT RUN."""
 
 
 def _query(provider: AcademicProvider) -> AcademicSearchQuery:
@@ -82,10 +93,17 @@ def _assert_contract_holds(result: AcademicSearchResult, provider: AcademicProvi
 
 
 @pytest.mark.skipif(
-    not RUN_CONSENSUS, reason="live Consensus test; set RUN_CONSENSUS_TESTS=1 to enable"
+    not CONSENSUS_READY,
+    reason=(
+        "live Consensus test; needs RUN_CONSENSUS_TESTS=1 AND a CONSENSUS_API_KEY. "
+        "Without the key the provider is NOT RUN, never PASS."
+    ),
 )
 def test_live_consensus_search_parses() -> None:
     result = ConsensusProvider().search(_query(AcademicProvider.CONSENSUS), limit=3)
+    assert result.status is not AcademicSearchStatus.AUTH_ERROR, (
+        "the key was rejected, so the contract was never exercised"
+    )
     _assert_contract_holds(result, AcademicProvider.CONSENSUS)
 
 
@@ -93,8 +111,22 @@ def test_live_consensus_search_parses() -> None:
     not RUN_OPENALEX, reason="live OpenAlex test; set RUN_OPENALEX_TESTS=1 to enable"
 )
 def test_live_openalex_search_parses() -> None:
+    """OpenAlex is keyless, which is the one contract fully verifiable live."""
     result = OpenAlexProvider().search(_query(AcademicProvider.OPENALEX), limit=3)
+    assert result.status is not AcademicSearchStatus.PROVIDER_ERROR, (
+        "the documented /works request was rejected"
+    )
     _assert_contract_holds(result, AcademicProvider.OPENALEX)
+
+
+@pytest.mark.skipif(
+    not RUN_OPENALEX, reason="live OpenAlex test; set RUN_OPENALEX_TESTS=1 to enable"
+)
+def test_live_openalex_accepts_the_documented_page_size_parameter() -> None:
+    """The documented `per_page` must be what the live API honours."""
+    result = OpenAlexProvider().search(_query(AcademicProvider.OPENALEX), limit=2)
+    assert result.status in EXECUTED_SEARCH_STATUSES
+    assert len(result.candidates) <= 2, "per_page was not honoured by the live API"
 
 
 @pytest.mark.skipif(
@@ -119,3 +151,15 @@ def test_live_tests_are_opt_in_by_name_not_by_credentials() -> None:
     assert RUN_SEMANTIC_SCHOLAR == (os.getenv("RUN_SEMANTIC_SCHOLAR_TESTS") == "1")
     if os.getenv(CONSENSUS_API_KEY_ENV) and os.getenv("RUN_CONSENSUS_TESTS") != "1":
         assert RUN_CONSENSUS is False
+
+
+def test_a_credentialed_provider_is_not_run_without_its_credential() -> None:
+    """Opting in is not the same as being able to run.
+
+    Consensus requires a key. Without one the connector answers AUTH_ERROR,
+    which satisfies every structural assertion in this file -- so the gate is
+    placed before the test runs, not inside it.
+    """
+    assert CONSENSUS_READY == (RUN_CONSENSUS and has_api_key(CONSENSUS_API_KEY_ENV))
+    if RUN_CONSENSUS and not has_api_key(CONSENSUS_API_KEY_ENV):
+        assert CONSENSUS_READY is False, "opted in without a key means NOT RUN"

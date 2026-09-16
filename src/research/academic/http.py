@@ -8,11 +8,14 @@ retry classification, bounded backoff and the failure envelope live here once.
 What is retried is a property of the failure kind, not of the connector:
 
     retried      timeout, connection reset, 429, 500, 502, 503, 504
-    not retried  400, 401, 403, 404, malformed JSON, schema incompatibility
+    not retried  400, 401, 402, 403, 404, 422, malformed JSON,
+                 schema incompatibility
 
 403 is deliberately non-retryable. A provider that documents it as transient
 would need its own reviewed decision; guessing would turn an authorization
-problem into a retry storm.
+problem into a retry storm. 402 (payment or quota) and 422 (unprocessable
+request) are non-retryable for the same reason: an identical second request
+cannot change an account state or a malformed query.
 
 Waiting is injected. ``NoSleep`` is the default, so the standard suite exercises
 the full backoff path -- including ``Retry-After`` -- without a single real
@@ -123,10 +126,16 @@ def classify_http_status(status: int) -> AcademicErrorKind | None:
         return AcademicErrorKind.BAD_REQUEST
     if status == 401:
         return AcademicErrorKind.AUTH_ERROR
+    if status == 402:
+        # Payment or quota. A valid key with a spent allowance looks like this,
+        # so it is reported distinctly from a rejected key.
+        return AcademicErrorKind.PAYMENT_REQUIRED
     if status == 403:
         return AcademicErrorKind.FORBIDDEN
     if status == 404:
         return AcademicErrorKind.NOT_FOUND
+    if status == 422:
+        return AcademicErrorKind.UNPROCESSABLE_REQUEST
     if status == 429:
         return AcademicErrorKind.RATE_LIMITED
     if status >= 500:
