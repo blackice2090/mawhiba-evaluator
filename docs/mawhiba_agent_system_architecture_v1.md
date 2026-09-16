@@ -646,6 +646,36 @@ OpenAI Responses API يستخدم داخل الـ Nodes.
 
 ---
 
+> **Amended in Phase 2A (ADR-006, ADR-007).**
+>
+> **Research trust progression.** Research consumes canonical state and produces
+> nothing canonical until each boundary is crossed deterministically:
+>
+> ```text
+> Canonical ProjectState
+>       ↓
+> Research Query Planner
+>       ↓
+> Verified Query Plan
+>       ↓
+> Source Candidate
+>       ↓
+> Verified Source
+>       ↓
+> Evidence
+>       ↓
+> Claim Support
+> ```
+>
+> Every accepted query traces to trusted canonical fields; generated synonyms are
+> search expansions only and never become project facts. Retrieval produces
+> candidate sources, verification produces sources, and evidence extraction and
+> claim support are separate later stages. N03 official requirements are retrieved
+> only from allowlisted Mawhiba domains, snapshotted with a content hash, and
+> extracted with verbatim provenance. See `docs/phase2a_research_foundation.md`.
+
+---
+
 # 9. Parallel Research Stage
 
 بعد N05 تعمل الفروع بالتوازي.

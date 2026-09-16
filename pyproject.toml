@@ -13,6 +13,10 @@ dependencies = [
     # Resolved to 3.13.0 during Phase 1B. No API key is needed to import the
     # package or to run the unit suite.
     "openai>=2.0,<4.0",
+    # Official Mawhiba page retrieval (Phase 2A). Already installed as an openai
+    # dependency; declared because src.research.official.http_provider uses it
+    # directly. Standard tests exercise it only through httpx.MockTransport.
+    "httpx>=0.27,<1.0",
 ]
 
 [project.optional-dependencies]

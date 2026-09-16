@@ -7,6 +7,7 @@ from enum import StrEnum
 from pydantic import Field, model_validator
 
 from src.schemas.common import (
+    SOURCE_ID_PATTERN,
     BranchStatus,
     ConfidenceLevel,
     EvaluationStatus,
@@ -63,7 +64,7 @@ class PriorArtRecord(MawhibaModel):
     """One closest-prior-art candidate anchored to a source (7.4)."""
 
     prior_art_id: str = Field(pattern=r"^PA-\d{3,}$", examples=["PA-001"])
-    source_id: str = Field(pattern=r"^SRC-\d{3,}$")
+    source_id: str = Field(pattern=SOURCE_ID_PATTERN)
     kind: PriorArtKind
     title: str | None = None
     similarity_dimensions: SimilarityDimensions = Field(

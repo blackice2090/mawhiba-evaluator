@@ -11,6 +11,7 @@ from __future__ import annotations
 from pydantic import Field, model_validator
 
 from src.schemas.common import (
+    SOURCE_ID_PATTERN,
     ConfidenceLevel,
     EvaluationStatus,
     MawhibaModel,
@@ -45,7 +46,7 @@ class Rubric(MawhibaModel):
     axes: list[RubricAxisDefinition] = Field(min_length=1)
     source_id: str | None = Field(
         default=None,
-        pattern=r"^SRC-\d{3,}$",
+        pattern=SOURCE_ID_PATTERN,
         description="Required for OFFICIAL rubrics: the official source it came from.",
     )
 

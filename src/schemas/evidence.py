@@ -7,7 +7,7 @@ from enum import StrEnum
 
 from pydantic import Field, model_validator
 
-from src.schemas.common import MawhibaModel, UtcDatetime
+from src.schemas.common import SOURCE_ID_PATTERN, MawhibaModel, UtcDatetime
 
 
 class EvidenceType(StrEnum):
@@ -56,7 +56,7 @@ class EvidenceRecord(MawhibaModel):
 
     evidence_id: str = Field(pattern=r"^E-\d{3,}$", examples=["E-001"])
     source_id: str = Field(
-        pattern=r"^SRC-\d{3,}$",
+        pattern=SOURCE_ID_PATTERN,
         description="Mandatory: evidence without a source is not evidence (2.2).",
     )
     evidence_type: EvidenceType
