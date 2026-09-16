@@ -105,19 +105,29 @@ CONSENSUS_CAPABILITY = ProviderCapability(
     identifiers=("doi",),
     supplies_abstract=True,
     supplies_citation_count=True,
-    supplies_open_access=True,
+    supplies_open_access=False,
     supplies_retraction_status=False,
-    supplies_publication_type=True,
+    supplies_publication_type=False,
     supplies_publication_date=True,
-    supplies_relevance_score=True,
-    notes="Synthesized text and relevance are provider-generated secondary "
-    "metadata; they never become the paper's abstract or evidence.",
+    supplies_relevance_score=False,
+    notes="Synthesized text (takeaway) is provider-generated secondary metadata; "
+    "it never becomes the paper's abstract or evidence. Verified against the "
+    "published QueryResult schema on 2026-09-16.",
     known_limitations=(
         "No OpenAlex, Semantic Scholar, PubMed or arXiv identifier, so a record "
         "without a DOI can only be deduplicated on its canonical URL.",
+        "The result record carries no stable paper id, so provider_record_id is "
+        "always None for this provider.",
         "Study type describes methodology, not publication form; only the review "
         "family is mapped to a source type.",
         "Retraction status is not exposed, so it stays None rather than False.",
+        "Open-access status is a request filter, not a result field, so "
+        "is_open_access stays None.",
+        "A semantic relevance score exists but only when include_semantic_score "
+        "is requested, which this connector does not send.",
+        "The record does expose is_preprint. It is deliberately not mapped to a "
+        "source type in Phase 2B: that would be new behaviour, not contract "
+        "hardening, and is recorded as deferred work.",
     ),
 )
 

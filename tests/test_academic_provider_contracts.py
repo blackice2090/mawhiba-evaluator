@@ -157,6 +157,104 @@ def test_consensus_calls_the_current_search_endpoint(monkeypatch) -> None:
     assert call["headers"][CONSENSUS_API_KEY_HEADER] == "test-consensus-key"
 
 
+def test_consensus_rest_authentication_is_the_x_api_key_header(monkeypatch) -> None:
+    """The REST scheme, pinned. Verified 2026-09-16 from two provider sources.
+
+    The published OpenAPI 3.1.0 definition declares exactly one security scheme
+    -- ``XApiKeyHeader`` (apiKey, in header, name ``x-api-key``) -- and applies
+    it to ``GET /v1/search``. The official Get Started page states the same and
+    shows a matching curl example. Neither mentions ``Authorization`` or
+    ``Bearer``; Consensus's MCP server is a separate surface and its
+    authentication is never a source for the REST contract.
+
+    This test fails if a bearer scheme is ever introduced here without that
+    change being evidenced against the REST documentation.
+    """
+    _no_credentials(monkeypatch)
+    monkeypatch.setenv(CONSENSUS_API_KEY_ENV, "test-consensus-key")
+    client = RecordingClient({"results": []})
+
+    ConsensusProvider(client=client).search(_query(AcademicProvider.CONSENSUS), limit=7)
+
+    headers = client.call["headers"]
+    assert CONSENSUS_API_KEY_HEADER == "x-api-key"
+    assert headers["x-api-key"] == "test-consensus-key"
+    # No alternative or speculative scheme, and no sending of both.
+    lowered = {name.lower() for name in headers}
+    assert "authorization" not in lowered, "the REST API defines no bearer scheme"
+    assert "x-api-key-header" not in lowered
+    assert "api-key" not in lowered
+    assert "apikey" not in lowered
+    assert sum(1 for name in lowered if "api" in name and "key" in name) == 1
+
+
+def test_a_consensus_key_never_leaves_the_authentication_header(monkeypatch) -> None:
+    """The credential appears in exactly one place and nowhere else."""
+    _no_credentials(monkeypatch)
+    secret = "super-secret-consensus-value"
+    monkeypatch.setenv(CONSENSUS_API_KEY_ENV, secret)
+    client = RecordingClient(
+        {
+            "results": [
+                {
+                    "title": "A paper",
+                    "doi": "10.1234/abcd",
+                    "publish_year": 2021,
+                    "journal_name": "Plant Science",
+                    "url": "https://example.org/p",
+                }
+            ]
+        }
+    )
+
+    result = ConsensusProvider(client=client).search(
+        _query(AcademicProvider.CONSENSUS), limit=7
+    )
+    call = client.call
+
+    assert call["headers"][CONSENSUS_API_KEY_HEADER] == secret
+    assert secret not in call["url"], "never in the URL"
+    assert secret not in json.dumps(call["params"]), "never in a query parameter"
+    assert secret not in result.model_dump_json(), "never in AcademicSearchResult"
+    candidate = result.candidates[0]
+    assert secret not in candidate.model_dump_json(), "never in a source candidate"
+    assert secret not in (candidate.raw_provider_metadata or ""), (
+        "never in raw_provider_metadata"
+    )
+
+    failing = RecordingClient({}, status_code=500)
+    errored = ConsensusProvider(client=failing).search(
+        _query(AcademicProvider.CONSENSUS), limit=7
+    )
+    assert errored.errors, "the failure path is what is being checked"
+    assert all(secret not in error.message for error in errored.errors)
+    assert secret not in errored.model_dump_json(), "never in error serialization"
+
+
+def test_consensus_reads_the_published_result_record_fields() -> None:
+    """The DTO names match the published QueryResult schema, verified 2026-09-16."""
+    from src.research.academic.consensus import ConsensusPaper
+
+    published = {
+        "abstract",
+        "authors",
+        "citation_count",
+        "doi",
+        "journal_name",
+        "publish_date",
+        "publish_year",
+        "publisher_name",
+        "semantic_score",
+        "study_type",
+        "takeaway",
+        "title",
+        "url",
+    }
+    assert published <= set(ConsensusPaper.model_fields), sorted(
+        published - set(ConsensusPaper.model_fields)
+    )
+
+
 def test_consensus_does_not_use_the_stale_endpoint_or_parameter(monkeypatch) -> None:
     """The Phase 2B implementation sent `search/papers?...&size`. Neither may return."""
     _no_credentials(monkeypatch)

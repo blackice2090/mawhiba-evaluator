@@ -7,6 +7,8 @@ cross-provider identity resolution and conservative merging; the academic branch
 graph; coverage; and a 51-case Gold evaluation.
 **Amended by Phase 2B.1:** provider API contract verification and hardening
 (section 2a).
+**Amended by Phase 2B.2:** Consensus REST authentication resolved against the
+provider's OpenAPI definition; result-record field names corrected (section 2b).
 **Prior phases:** `docs/phase2a_research_foundation.md`, `docs/phase2a1_hardening.md`
 **Decision records:** ADR-008 (provider isolation), ADR-009 (logical source vs
 provider observation), ADR-010 (academic retrieval is not evidence). ADR-006 and
@@ -136,10 +138,10 @@ actually builds matches this table.
 | Base URL | `https://api.consensus.app` | `https://api.openalex.org` | `https://api.semanticscholar.org/graph/v1` |
 | Endpoint | `/v1/search` | `/works` | `/paper/search` |
 | Method | `GET` | `GET` | `GET` |
-| Authentication | `x-api-key` header, **required** | `api_key` query parameter, **optional** | `x-api-key` header, **optional** |
+| Authentication | `x-api-key` header, **required** (OpenAPI `XApiKeyHeader`) | `api_key` query parameter, **optional** | `x-api-key` header, **optional** |
 | Required parameter | `query` | `search` | `query` |
 | Result-limit parameter | `page_size` | `per_page` | `limit` |
-| Documented max | 1000 per query | 100 | 100 |
+| Documented max | plan-dependent, server-capped; `(page + 1) * page_size <= 1000` | 100 | 100 |
 | Response envelope | `results` (+ `page`, `page_size`, `is_end`, `next_page`) | `{meta, results}` | `{total, offset, next, data}` |
 | Other parameters sent | -- | `mailto` (polite pool, optional) | `fields` |
 | Contract reviewed | 2026-09-16 | 2026-09-16 | 2026-09-16 |
@@ -157,11 +159,88 @@ actually builds matches this table.
 Verification method: the OpenAlex contract was confirmed against the published
 API reference **and** against a live keyless call
 (`/works?search=...&per_page=2` returned `{meta, results}` with
-`meta.per_page == 2`). The Consensus and Semantic Scholar contracts were
-confirmed against the providers' published documentation; `docs.consensus.app`
-is not publicly fetchable, so the Consensus request contract comes from the
-provider's own published API repository together with the documented endpoint
-description.
+`meta.per_page == 2`). The Semantic Scholar contract was confirmed against
+the provider's published documentation. The Consensus contract was confirmed at
+Phase 2B.1 from the provider's published API repository, and then **re-verified
+at Phase 2B.2 directly against the provider's OpenAPI definition and Get Started
+page** -- see section 2b, which supersedes the Phase 2B.1 note that
+`docs.consensus.app` could not be retrieved.
+
+## 2b. Consensus REST authentication (Phase 2B.2)
+
+A second review resolved an ambiguity raised before merge: some material
+describes Consensus authentication as `Authorization: Bearer <key>`, while this
+connector sends `x-api-key`. Two provider-owned sources were consulted, in
+authority order.
+
+**1. The published OpenAPI 3.1.0 definition** (`docs.consensus.app/openapi.json`,
+retrieved 2026-09-16) is endpoint-specific and therefore authoritative. It
+declares exactly one security scheme and applies it to the search endpoint:
+
+```jsonc
+"servers": [{ "url": "https://api.consensus.app" }],
+"components": { "securitySchemes": {
+  "XApiKeyHeader": { "type": "apiKey", "in": "header", "name": "x-api-key" }
+}},
+"paths": {
+  "/v1/search":       { "get": { "security": [{"XApiKeyHeader": []}], "deprecated": false } },
+  "/v1/quick_search": { "get": { "security": [{"XApiKeyHeader": []}], "deprecated": true  } }
+}
+```
+
+There is **no** `http`/`bearer` security scheme in the document at all.
+
+**2. The official Get Started page** (`docs.consensus.app/api-get-started`)
+states that every request must include the key in the `x-api-key` header, and
+shows a matching example:
+
+```text
+curl -G "https://api.consensus.app/v1/search" -H "x-api-key: $CONSENSUS_API_KEY" ...
+```
+
+**The two sources agree**, so the conflict rule did not need to be applied.
+Neither contains the string `Authorization` or `Bearer`.
+
+**REST versus MCP.** Consensus ships a separate MCP server, documented under its
+own navigation section. Its page documents neither `x-api-key` nor a bearer
+header, so it offers no evidence either way — and per the rule this project
+follows, MCP authentication is never a source for the REST contract. The
+`Authorization: Bearer` form is therefore **not** part of the `/v1/search`
+contract.
+
+**Outcome: no implementation change.** `x-api-key` was already correct and is
+now pinned by
+`test_consensus_rest_authentication_is_the_x_api_key_header`, which also asserts
+that no `Authorization` header is sent and that exactly one API-key header
+exists — no speculative fallback, and never both schemes at once.
+
+### Result-record corrections found during the same review
+
+Verifying the whole contract surfaced field names that did not match the
+published `QueryResult` schema. These were silent: each one parsed to `None`
+rather than failing, so no test could see them.
+
+| DTO read | Published field | Effect before the fix |
+|---|---|---|
+| `publication_date` | `publish_date` | publication date always `None` |
+| `publisher` | `publisher_name` | publisher always `None` |
+| `relevance_score` | `semantic_score` | provider relevance always `None` |
+
+The previous spellings are retained as tolerated aliases. Three capability
+claims were also falsified by the schema and corrected: Consensus supplies
+**no** open-access status (it is a request filter, not a result field), **no**
+publication type, and **no** relevance score unless `include_semantic_score` is
+requested, which this connector does not send. The result record also carries no
+stable paper id, so `provider_record_id` is always `None` for this provider and
+its records deduplicate on DOI or canonical URL.
+
+Gold case AR-045 was rebuilt accordingly: its open-access disagreement now runs
+between OpenAlex and Semantic Scholar, the two providers that actually report
+it, rather than relying on a Consensus field that does not exist.
+
+`is_preprint` **is** a real Consensus result field. It is deliberately left
+unmapped: using it would be new behaviour rather than contract hardening, and it
+is recorded as deferred work.
 
 ### HTTP status semantics
 
@@ -178,10 +257,15 @@ description.
 
 402 and 401 are deliberately distinct **kinds** while sharing a branch status: a
 spent quota and a rejected key are different operational facts, and both mean
-the provider cannot be used right now. The 402 and 422 mappings are this
-project's defensive handling rather than a quoted provider error table -- neither
-provider publishes one publicly -- so they are conservative: both are
-non-retryable.
+the provider cannot be used right now.
+
+Evidence, after the Phase 2B.2 review: the Consensus OpenAPI documents only
+**200** and **422 Validation Error** for `/v1/search`, so the `422 ->
+UNPROCESSABLE_REQUEST` mapping is now backed by the provider's own definition.
+**401, 402 and 429 are not documented** by either provider, so their mappings
+remain this project's defensive handling. All three are conservative: 401 and
+402 are non-retryable, and 429 is retried only to the bound and only for the
+interval the response itself asks for.
 
 ---
 
@@ -707,7 +791,7 @@ reproducible:
 ACADEMIC-CONTRACT-V1              contract_version
 ACADEMIC-NORMALIZER-V1            normalizer_version
 ACADEMIC-DEDUP-V1                 dedup_version
-CONSENSUS-CONNECTOR-V2            connector_versions[CONSENSUS]
+CONSENSUS-CONNECTOR-V3            connector_versions[CONSENSUS]
 OPENALEX-CONNECTOR-V2             connector_versions[OPENALEX]
 SEMANTIC-SCHOLAR-CONNECTOR-V1     connector_versions[SEMANTIC_SCHOLAR]
 ```
@@ -802,9 +886,17 @@ no source quality, no tier assignment
     environment. A response differing from its published schema would surface as
     rejected records with named reasons rather than as bad data, but it has not
     been proven end to end.
-11. **The 402 and 422 mappings are defensive**, not quoted from a provider error
-    table; neither provider publishes one publicly.
-12. **Arabic matching stays exact**, inherited from Phase 2A.1: no alef/ya
+11. **The 401, 402 and 429 mappings are defensive**, not quoted from a provider
+    error table. Only Consensus's 422 is documented (OpenAPI, `/v1/search`);
+    neither provider publishes a full error table.
+12. **Consensus `page_size` has no fixed documented maximum.** The effective
+    per-page limit is plan-dependent and capped server-side, echoed back as
+    `page_size` in the response; the only hard rule is
+    `(page + 1) * page_size <= 1000`. The connector clamps at that absolute
+    ceiling, which the configured budget never approaches.
+13. **`is_preprint` from Consensus is available but unmapped**, deferred as new
+    behaviour rather than contract hardening.
+14. **Arabic matching stays exact**, inherited from Phase 2A.1: no alef/ya
     normalization and no diacritic folding, in line with the no-fuzzy-matching
     rule.
 

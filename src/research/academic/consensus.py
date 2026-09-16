@@ -58,18 +58,37 @@ from src.schemas.academic import (
     ProviderFacingModel,
 )
 
-CONSENSUS_CONNECTOR_VERSION = "CONSENSUS-CONNECTOR-V2"
+CONSENSUS_CONNECTOR_VERSION = "CONSENSUS-CONNECTOR-V3"
 CONSENSUS_BASE_URL = "https://api.consensus.app"
 CONSENSUS_SEARCH_PATH = "v1/search"
 """The current search endpoint. ``v1/quick_search`` is deprecated upstream
 (removal announced for 2027-02-07) and is deliberately not used."""
 
 CONSENSUS_API_KEY_HEADER = "x-api-key"
+"""The REST authentication header, and the only scheme the API defines.
+
+Confirmed by two agreeing provider-owned sources on 2026-09-16: the published
+OpenAPI 3.1.0 definition, whose sole security scheme is
+``XApiKeyHeader`` (``apiKey`` / ``header`` / ``x-api-key``) and which applies it
+to ``GET /v1/search``; and the official Get Started page, which states that
+every request must include the key in the ``x-api-key`` header. Neither source
+mentions ``Authorization`` or ``Bearer`` anywhere. Consensus's MCP server is a
+separate product surface and says nothing about this header in either
+direction, so nothing about REST authentication is inferred from it.
+"""
+
 CONSENSUS_QUERY_PARAM = "query"
 CONSENSUS_PAGE_SIZE_PARAM = "page_size"
 CONSENSUS_MAX_PAGE_SIZE = 1000
-"""Documented ceiling per query. The budget is far below it; this only stops a
-misconfiguration from asking for more than the API accepts."""
+"""The absolute ceiling a single page can reach.
+
+The API documents two separate limits: a query returns at most 1000 results in
+total (``(page + 1) * page_size <= 1000``), and the effective per-page maximum
+is **plan-dependent** and capped server-side, echoed back as ``page_size`` in
+the response. This constant is therefore an upper bound that stops a
+misconfiguration, not a promise about any one plan. The configured budget sits
+far below it, so it is never the binding constraint.
+"""
 
 CONSENSUS_CONTRACT_REVIEWED_ON = "2026-09-16"
 
@@ -118,12 +137,16 @@ class ConsensusPaper(ProviderFacingModel):
     publish_year: Any = Field(
         default=None, validation_alias=AliasChoices("publish_year", "year")
     )
-    publication_date: Any = None
+    publish_date: Any = Field(
+        default=None, validation_alias=AliasChoices("publish_date", "publication_date")
+    )
     journal_name: str | None = Field(
         default=None,
         validation_alias=AliasChoices("journal_name", "journal", "venue"),
     )
-    publisher: str | None = None
+    publisher_name: str | None = Field(
+        default=None, validation_alias=AliasChoices("publisher_name", "publisher")
+    )
     doi: str | None = None
     url: str | None = None
     citation_count: Any = Field(
@@ -133,7 +156,9 @@ class ConsensusPaper(ProviderFacingModel):
     is_retracted: Any = None
     study_type: str | None = None
     publication_type: str | None = None
-    relevance_score: Any = None
+    semantic_score: Any = Field(
+        default=None, validation_alias=AliasChoices("semantic_score", "relevance_score")
+    )
     takeaway: str | None = Field(
         default=None,
         validation_alias=AliasChoices("takeaway", "consensus_summary", "claim", "summary"),
@@ -176,7 +201,12 @@ def _source_type(paper: ConsensusPaper) -> AcademicSourceType:
 
 
 def _relevance(value: Any) -> float | None:
-    """Consensus's own ranking signal, kept only as retrieval metadata."""
+    """Consensus's own ranking signal, kept only as retrieval metadata.
+
+    Returned only when ``include_semantic_score`` is requested, which this
+    connector does not send, so in practice it stays ``None``. Read anyway, so a
+    caller that enables it later gets it recorded rather than dropped.
+    """
     try:
         score = float(value)
     except (TypeError, ValueError):
@@ -276,9 +306,9 @@ def normalize_consensus_response(
                 abstract=clean_text(paper.abstract),
                 authors=clean_authors(paper.authors),
                 publication_year=year,
-                publication_date=clean_date(paper.publication_date),
+                publication_date=clean_date(paper.publish_date),
                 venue=clean_text(paper.journal_name),
-                publisher=clean_text(paper.publisher),
+                publisher=clean_text(paper.publisher_name),
                 identifiers=identifiers,
                 canonical_url=doi_url(identifiers.doi) if identifiers.doi else url.value,
                 provider_url=url.value,
@@ -286,7 +316,7 @@ def normalize_consensus_response(
                 is_open_access=clean_flag(paper.is_open_access),
                 is_retracted=clean_flag(paper.is_retracted),
                 provider_rank=rank,
-                provider_relevance=_relevance(paper.relevance_score),
+                provider_relevance=_relevance(paper.semantic_score),
                 provider_record_id=clean_text(paper.paper_id),
                 raw_provider_metadata=raw_metadata(record),
             )

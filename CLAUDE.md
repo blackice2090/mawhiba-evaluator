@@ -176,6 +176,12 @@ value that must never return (`search/papers`, `size`, `per-page`). The
 contract table is section 2a of the Phase 2B doc, and `ProviderCapability` reads
 the connector constants rather than restating them, so the table cannot drift.
 
+Phase 2B.2 resolved the Consensus REST authentication question from the
+provider's own OpenAPI definition: the only security scheme is `x-api-key`, and
+no bearer scheme exists. Consensus's MCP server is a separate surface and is
+never a source for the REST contract. Never introduce an `Authorization: Bearer`
+header here without evidence from the REST documentation.
+
 The approved baseline (`evals/intake/baselines/v1.json`) is never overwritten
 automatically — `write_baseline(..., approve=True)` or `--approve-baseline` is
 required. Reports go to the git-ignored `eval_reports/`.
@@ -240,3 +246,13 @@ scoring engine, Red Team, report generation, PostgreSQL checkpointer and UI are
 When a prior guarantee blocks new work, the answer is almost never to relax the
 guarantee — the guards in `test_workflow_hardening.py` and
 `test_language_policy.py` exist precisely to fire on new code.
+
+## graphify
+
+This project has a knowledge graph at graphify-out/ with god nodes, community structure, and cross-file relationships.
+
+Rules:
+- For codebase questions, first run `graphify query "<question>"` when graphify-out/graph.json exists. Use `graphify path "<A>" "<B>"` for relationships and `graphify explain "<concept>"` for focused concepts. These return a scoped subgraph, usually much smaller than GRAPH_REPORT.md or raw grep output.
+- If graphify-out/wiki/index.md exists, use it for broad navigation instead of raw source browsing.
+- Read graphify-out/GRAPH_REPORT.md only for broad architecture review or when query/path/explain do not surface enough context.
+- After modifying code, run `graphify update .` to keep the graph current (AST-only, no API cost).
