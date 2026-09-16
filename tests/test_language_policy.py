@@ -68,16 +68,32 @@ ARABIC_AS_DATA: dict[Path, str] = {
     / "research_planning"
     / "v1"
     / "cases.jsonl": "synthetic Arabic project values, source terms and synthetic names",
+    PROJECT_ROOT
+    / "evals"
+    / "academic_retrieval"
+    / "v1"
+    / "cases.jsonl": "synthetic Arabic and mixed-language academic queries and paper titles",
 }
 
 FILES_ALLOWED_TO_QUOTE_ARABIC = set(ARABIC_AS_DATA)
+
+
+GENERATED_OUTPUT_DIRS = frozenset({".venv", ".pytest_cache", "graphify-out"})
+"""Directories that hold generated output rather than authored source.
+
+The language policy governs surfaces a developer writes. A tool's own output --
+a virtualenv, a pytest cache, a code-graph report that quotes the Arabic
+architecture document back at us -- is not one of them, and is not in the
+repository either. Every *authored* file on disk is still scanned, including
+untracked ones, so the policy cannot be bypassed by not committing a file yet.
+"""
 
 
 def _tracked_source_files() -> list[Path]:
     files: list[Path] = []
     for pattern in ("*.py", "*.md", "*.toml"):
         for path in PROJECT_ROOT.rglob(pattern):
-            if ".venv" in path.parts or ".pytest_cache" in path.parts:
+            if GENERATED_OUTPUT_DIRS & set(path.parts):
                 continue
             files.append(path)
     return files

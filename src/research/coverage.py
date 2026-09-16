@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from src.schemas.academic import AcademicBranchOutcome
 from src.schemas.common import ResearchBranch
 from src.schemas.official import OfficialRequirementsOutcome
 from src.schemas.research import BranchExecutionCoverage, ResearchRun, ResearchRunStatus
@@ -17,7 +18,14 @@ EXECUTED_BRANCHES_PHASE_2A: frozenset[ResearchBranch] = frozenset(
     {ResearchBranch.OFFICIAL_REQUIREMENTS}
 )
 
+EXECUTED_BRANCHES: frozenset[ResearchBranch] = frozenset(
+    {ResearchBranch.OFFICIAL_REQUIREMENTS, ResearchBranch.ACADEMIC}
+)
+"""Branches with an implemented retrieval path. Phase 2B added ACADEMIC."""
+
 NOT_EXECUTED_NOTE = "planned only; retrieval for this branch is not implemented in Phase 2A"
+
+ACADEMIC_NOT_RUN_NOTE = "planned only; the academic branch has not been executed for this run"
 
 
 def initial_branch_coverage() -> list[BranchExecutionCoverage]:
@@ -54,6 +62,11 @@ def build_branch_coverage(run: ResearchRun) -> list[BranchExecutionCoverage]:
             continue
 
         queries = run.query_plan.accepted_for(branch) if run.query_plan else []
+
+        if branch is ResearchBranch.ACADEMIC:
+            coverage.append(_academic_coverage(run, required, len(queries)))
+            continue
+
         coverage.append(
             BranchExecutionCoverage(
                 branch=branch,
@@ -64,6 +77,44 @@ def build_branch_coverage(run: ResearchRun) -> list[BranchExecutionCoverage]:
             )
         )
     return coverage
+
+
+def _academic_coverage(
+    run: ResearchRun, required: bool, planned_query_count: int
+) -> BranchExecutionCoverage:
+    """Operational coverage for the Phase 2B academic branch.
+
+    Counters describe execution only. ``verified_source_count`` counts logical
+    sources whose metadata verified -- it says nothing about whether any of them
+    is relevant, sound or supports anything (ADR-010).
+    """
+    result = run.academic_research
+    if result is None or result.outcome is AcademicBranchOutcome.NOT_RUN:
+        return BranchExecutionCoverage(
+            branch=ResearchBranch.ACADEMIC,
+            required=required,
+            planned=bool(planned_query_count),
+            query_count=planned_query_count,
+            note=ACADEMIC_NOT_RUN_NOTE if planned_query_count else None,
+        )
+
+    failed = result.outcome is AcademicBranchOutcome.FAILED
+    return BranchExecutionCoverage(
+        branch=ResearchBranch.ACADEMIC,
+        required=required,
+        planned=True,
+        started=True,
+        completed=not failed,
+        failed=failed,
+        query_count=result.budget.queries_executed,
+        candidate_count=len(result.candidates),
+        verified_source_count=len(result.logical_sources),
+        provider_success_count=result.provider_success_count,
+        provider_failure_count=result.provider_failure_count,
+        provider_empty_count=result.provider_empty_count,
+        failure_reason=result.outcome.value if failed else None,
+        note=f"academic branch outcome {result.outcome.value}",
+    )
 
 
 def decide_run_status(run: ResearchRun) -> ResearchRunStatus:

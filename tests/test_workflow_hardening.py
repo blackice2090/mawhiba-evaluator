@@ -505,6 +505,38 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         # Student identity context for PII minimization. Deliberately never placed
         # on graph state, so personal data can never reach a checkpoint.
         "PiiKind",
+        # Phase 2B academic retrieval configuration: per-process policy. The
+        # budget that a run actually ran under IS checkpointed, as the
+        # AcademicBudgetReport on the AcademicRetrievalResult.
+        "AcademicSearchSettings",
+        # Phase 2B provider-facing DTOs. Each one is the untrusted boundary of a
+        # single academic API: it is validated inside its connector, mapped to
+        # canonical AcademicSourceCandidates, and discarded. Only the canonical
+        # form is persisted, plus the record's compact JSON on the candidate.
+        "ProviderFacingModel",
+        "ConsensusPaper",
+        "ConsensusSearchResponse",
+        "OpenAlexAuthor",
+        "OpenAlexAuthorship",
+        "OpenAlexLocation",
+        "OpenAlexOpenAccess",
+        "OpenAlexSearchResponse",
+        "OpenAlexSource",
+        "OpenAlexWork",
+        "SemanticScholarAuthor",
+        "SemanticScholarPaper",
+        "SemanticScholarSearchResponse",
+        "SemanticScholarVenue",
+        # Phase 2B academic retrieval eval layer: offline measurement artifacts
+        # that run outside any evaluation and never touch a checkpoint.
+        "AcademicGoldCase",
+        "AcademicGoldDataset",
+        "AcademicGoldExpectation",
+        "AcademicRetrievalMetrics",
+        "GoldBudget",
+        "GoldExpectedSource",
+        "GoldPlannedQuery",
+        "GoldProviderScript",
     }
 )
 """Types that legitimately never cross the checkpoint boundary.

@@ -5,4 +5,7 @@ __pycache__/
 *.egg-info/
 .env
 eval_reports/
-.claude/settings.local.json
+graphify-out/
+# Local agent/tooling configuration. Never tracked in this repository.
+.claude/
+*.graphify-bak

@@ -6,13 +6,14 @@ the official allowlist, and the role a reviewer assigned to it.
 
 from __future__ import annotations
 
-from pydantic import Field, field_validator
+from pydantic import Field, field_validator, model_validator
 
 from src.research.official.allowlist import (
     OFFICIAL_IBDAA_SERVICE_URL,
     OFFICIAL_ROOT_URL,
     check_official_url,
 )
+from src.schemas.academic import ACADEMIC_PROVIDER_ORDER, AcademicProvider
 from src.schemas.common import MawhibaModel
 from src.schemas.official import (
     MAX_COMPETITION_EDITION,
@@ -73,9 +74,53 @@ class OfficialRequirementsSettings(MawhibaModel):
         return [seed.url for seed in self.seeds]
 
 
+class AcademicSearchSettings(MawhibaModel):
+    """Phase 2B academic retrieval policy: which providers, and how much.
+
+    Budgets are deliberately small. The goal is high-value coverage of a few
+    well-provenanced queries, not volume: every extra query is a third-party
+    request, a cost, and more material for a later phase to weigh.
+
+    Every limit is enforced deterministically, and hitting one is recorded as
+    truncation -- never as a provider failure.
+    """
+
+    enabled_providers: list[AcademicProvider] = Field(
+        default_factory=lambda: list(ACADEMIC_PROVIDER_ORDER),
+        min_length=1,
+        description="Providers to dispatch to, deduplicated and run in the "
+        "canonical order regardless of how they are listed here.",
+    )
+    max_academic_queries_per_run: int = Field(default=4, ge=1, le=50)
+    max_results_per_query_per_provider: int = Field(default=10, ge=1, le=100)
+    max_results_per_provider_per_run: int = Field(default=30, ge=1, le=500)
+    max_total_academic_candidates: int = Field(default=90, ge=1, le=2000)
+
+    @field_validator("enabled_providers")
+    @classmethod
+    def _canonical_provider_order(
+        cls, providers: list[AcademicProvider]
+    ) -> list[AcademicProvider]:
+        chosen = set(providers)
+        return [p for p in ACADEMIC_PROVIDER_ORDER if p in chosen]
+
+    @model_validator(mode="after")
+    def _limits_are_coherent(self) -> AcademicSearchSettings:
+        if self.max_results_per_provider_per_run < self.max_results_per_query_per_provider:
+            raise ValueError(
+                "max_results_per_provider_per_run cannot be below the per-query limit"
+            )
+        if self.max_total_academic_candidates < self.max_results_per_provider_per_run:
+            raise ValueError(
+                "max_total_academic_candidates cannot be below the per-provider limit"
+            )
+        return self
+
+
 class ResearchSettings(MawhibaModel):
     limits: QueryPlanLimits = Field(default_factory=QueryPlanLimits)
     official: OfficialRequirementsSettings = Field(default_factory=OfficialRequirementsSettings)
+    academic: AcademicSearchSettings = Field(default_factory=AcademicSearchSettings)
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()

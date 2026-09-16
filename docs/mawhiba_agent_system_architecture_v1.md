@@ -714,6 +714,40 @@ OpenAI Responses API يستخدم داخل الـ Nodes.
 ### Output
 `AcademicSource[]`
 
+> **Amended in Phase 2B (ADR-008, ADR-009, ADR-010).**
+>
+> **Academic retrieval trust progression.** The academic branch is implemented as
+> isolated providers whose results become verified source *metadata* and stop
+> there:
+>
+> ```text
+> Verified Academic Query
+>         ↓
+> Provider Dispatch
+>         ↓
+> Consensus / OpenAlex / Semantic Scholar      isolated; one failure erases nothing
+>         ↓
+> Provider Results                             SUCCESS / PARTIAL / EMPTY / failure
+>         ↓
+> Canonical SourceCandidates                   AcademicSourceCandidate, untrusted
+>         ↓
+> Cross-Provider Identity Resolution           strong identifiers only, never titles
+>         ↓
+> Verified Academic Sources                    LogicalAcademicSource + SourceRecord
+>         ↓
+> [LATER PHASE]
+> Evidence Extraction
+> ```
+>
+> `AcademicSource[]` above is realized as `LogicalAcademicSource` — one logical
+> source per work, preserving every `ProviderObservation` (ADR-009). Metadata
+> verification and DOI verification are bibliographic only: a verified source is
+> not evidence and supports no claim (ADR-010). Retraction status, preprint
+> status and cross-provider metadata conflicts are preserved for the later phase
+> that weighs them.
+>
+> Details: `docs/phase2b_academic_research_connectors.md`.
+
 ### Important
 نتيجة Search وحدها ليست دليلًا نهائيًا.
 يتم Fetch/verify metadata للمصادر المختارة قبل استخدامها.
