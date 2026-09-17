@@ -588,6 +588,15 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "SufficiencyGoldCase",
         "SufficiencyGoldDataset",
         "SufficiencyGoldExpectation",
+        # Phase 2F claim-evidence scoring eval layer: the same shape as the
+        # Phase 2E block above. Phase 2F also makes no model call, so again
+        # there are no model-facing DTOs to exclude, and every production
+        # contract is checkpoint-reachable from
+        # ResearchRun.claim_evidence_scoring and registers automatically.
+        "ClaimScoringMetrics",
+        "ScoringGoldCase",
+        "ScoringGoldDataset",
+        "ScoringGoldExpectation",
     }
 )
 """Types that legitimately never cross the checkpoint boundary.
