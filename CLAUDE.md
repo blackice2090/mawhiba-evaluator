@@ -40,6 +40,9 @@ Python 3.12+ is required. A local venv is at `.venv`.
 # Evidence extraction eval (deterministic, fake provider)
 ./.venv/Scripts/python.exe -m src.evals.evidence.cli
 
+# Claim-evidence alignment eval (deterministic, fake provider)
+./.venv/Scripts/python.exe -m src.evals.claim_alignment.cli
+
 # Live evals / live integration tests -- NEVER run these without being asked
 RUN_OPENAI_INTAKE_EVALS=1 ./.venv/Scripts/python.exe -m src.evals.cli --live
 RUN_OPENAI_INTEGRATION_TESTS=1 ./.venv/Scripts/python.exe -m pytest tests/test_openai_integration.py
@@ -233,12 +236,13 @@ not obvious from the code.
 - `docs/phase2a_execution_spec.md` — the reviewed Phase 2A execution specification
 - `docs/phase2b_academic_research_connectors.md` — academic connectors, identity resolution, merge policy, evals
 - `docs/phase2c_evidence_extraction.md` — content snapshots, verbatim verification, numeric fidelity, evidence evals
-- `docs/adr/ADR-0{01..13}-*.md` — decisions and their rejected alternatives
+- `docs/phase2d_claim_evidence_alignment.md` — relationship taxonomy, claim anchors, alignment evals
+- `docs/adr/ADR-0{01..14}-*.md` — decisions and their rejected alternatives
 
 ## Phase discipline
 
 Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A, 2A.1, 2B, 2B.1,
-2B.2, 2C). Phase 2A
+2B.2, 2C, 2D). Phase 2A
 added the research foundation: `ResearchRun` on graph state (never in
 `ProjectState`), verified query planning, and official Mawhiba requirements
 retrieval (`build_phase2a_research_graph()`). Research planning must never write
@@ -272,10 +276,23 @@ so Phase 2C **cannot** express claim support even by accident (ADR-012). Evidenc
 from an abstract stays `ABSTRACT_ONLY` and is never presented as full-text
 verified (ADR-013).
 
-Claim-evidence alignment, novelty analysis, the scoring engine, Red Team, report
-generation, the patent / product / open-source / standards connectors, full-text
-acquisition, the PostgreSQL checkpointer and the UI are **not implemented**. Do
-not start them without being asked.
+Phase 2D added claim-evidence alignment. `ClaimEvidenceAlignmentRun` lives on
+the `ResearchRun`, never in `ProjectState`, for the same ownership reason as
+Phase 2C's evidence (ADR-010). A finite `AlignmentRelation` taxonomy
+(`SUPPORTS`, `CONTRADICTS`, `PARTIALLY_SUPPORTS`, `PARTIALLY_CONTRADICTS`,
+`MIXED`, `CONTEXT_ONLY`, `INSUFFICIENT`, `NOT_RELEVANT`) classifies the
+relationship between one existing claim and one verified Phase 2C evidence
+item; a deterministic verifier proves exact claim-anchor text
+(`claim.claim[start:end] == anchor_text`, no normalization), taxonomy
+consistency, and provenance, but never the underlying semantic correctness.
+Phase 2D **cannot** mutate a claim's status, confidence, `evidence_ids` or
+`counter_evidence_ids` — those fields do not exist on `ClaimEvidenceAlignment`
+(ADR-014). Claim-evidence alignment is not claim verification.
+
+Novelty analysis, the scoring engine, Red Team, report generation, the patent
+/ product / open-source / standards connectors, full-text acquisition, the
+PostgreSQL checkpointer and the UI are **not implemented**. Do not start them
+without being asked.
 
 When a prior guarantee blocks new work, the answer is almost never to relax the
 guarantee — the guards in `test_workflow_hardening.py` and

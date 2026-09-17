@@ -159,6 +159,16 @@ class EvidenceExtractionSettings(MawhibaModel):
         return self
 
 
+class ClaimAlignmentSettings(MawhibaModel):
+    """Phase 2D pairing policy: the hard safety limit against Cartesian growth.
+
+    Hitting the limit never truncates silently (section 12): the run is marked
+    ``BLOCKED_PAIR_LIMIT_EXCEEDED`` and the required count is recorded.
+    """
+
+    max_pairs_per_run: int = Field(default=500, ge=1, le=20000)
+
+
 class ResearchSettings(MawhibaModel):
     limits: QueryPlanLimits = Field(default_factory=QueryPlanLimits)
     official: OfficialRequirementsSettings = Field(default_factory=OfficialRequirementsSettings)
@@ -166,6 +176,7 @@ class ResearchSettings(MawhibaModel):
     evidence: EvidenceExtractionSettings = Field(
         default_factory=EvidenceExtractionSettings
     )
+    alignment: ClaimAlignmentSettings = Field(default_factory=ClaimAlignmentSettings)
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()

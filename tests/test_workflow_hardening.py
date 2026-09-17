@@ -554,6 +554,24 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "GoldEvidenceExpectation",
         "GoldObservation",
         "GoldSource",
+        # Phase 2D claim-evidence alignment configuration: per-process policy.
+        # The limit a run actually applied is recorded on the alignment run.
+        "ClaimAlignmentSettings",
+        # Phase 2D model-facing DTOs. The untrusted boundary of the
+        # classification call: validated inside the classifier, mapped to
+        # AlignmentCandidates and discarded. Only the canonical, verified form
+        # is persisted.
+        "AlignmentClassification",
+        "CandidateComponentDTO",
+        # Phase 2D claim-evidence alignment eval layer: offline measurement
+        # artifacts that run outside any evaluation and never touch a checkpoint.
+        "AlignmentGoldCase",
+        "AlignmentGoldDataset",
+        "AlignmentGoldExpectation",
+        "ClaimAlignmentMetrics",
+        "GoldComponent",
+        "GoldEvidenceItem",
+        "GoldScriptedResponse",
     }
 )
 """Types that legitimately never cross the checkpoint boundary.

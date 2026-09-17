@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from pydantic import ConfigDict, Field, model_validator
 
 from src.schemas.academic import AcademicRetrievalResult
+from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
 from src.schemas.evidence_extraction import EvidenceExtractionRun
 from src.schemas.common import (
     MawhibaModel,
@@ -344,6 +345,13 @@ class ResearchRun(MawhibaModel):
         "source inside ProjectState.sources, and verified academic sources "
         "deliberately live here instead (ADR-010, ADR-012).",
     )
+    claim_evidence_alignment: ClaimEvidenceAlignmentRun | None = Field(
+        default=None,
+        description="Phase 2D claim/evidence relationship classification. Lives "
+        "on the run, never in ProjectState: it references existing claims and "
+        "Phase 2C evidence without mutating either, and without deciding claim "
+        "sufficiency (ADR-014).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -378,6 +386,13 @@ class ResearchRun(MawhibaModel):
             and self.evidence_extraction.research_run_id != self.research_run_id
         ):
             raise ValueError("evidence_extraction belongs to a different research run")
+        if (
+            self.claim_evidence_alignment is not None
+            and self.claim_evidence_alignment.research_run_id != self.research_run_id
+        ):
+            raise ValueError(
+                "claim_evidence_alignment belongs to a different research run"
+            )
         return self
 
     @property
@@ -413,6 +428,17 @@ class ResearchRun(MawhibaModel):
         return bool(
             self.evidence_extraction
             and self.evidence_extraction.status is not EvidenceExtractionStatus.NOT_STARTED
+        )
+
+    @property
+    def claim_alignment_ran(self) -> bool:
+        """True once claim-evidence alignment executed, whatever it found."""
+        from src.schemas.claim_alignment import ClaimAlignmentStatus
+
+        return bool(
+            self.claim_evidence_alignment
+            and self.claim_evidence_alignment.status
+            is not ClaimAlignmentStatus.NOT_STARTED
         )
 
     def coverage_for(self, branch: ResearchBranch) -> BranchExecutionCoverage | None:
