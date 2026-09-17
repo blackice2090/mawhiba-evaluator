@@ -19,6 +19,7 @@ from pydantic import ConfigDict, Field, model_validator
 
 from src.schemas.academic import AcademicRetrievalResult
 from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
+from src.schemas.claim_sufficiency import ClaimSufficiencyRun
 from src.schemas.evidence_extraction import EvidenceExtractionRun
 from src.schemas.common import (
     MawhibaModel,
@@ -352,6 +353,13 @@ class ResearchRun(MawhibaModel):
         "Phase 2C evidence without mutating either, and without deciding claim "
         "sufficiency (ADR-014).",
     )
+    claim_sufficiency: ClaimSufficiencyRun | None = Field(
+        default=None,
+        description="Phase 2E claim sufficiency and evidence weighting. On the "
+        "run for the same ownership reason as Phase 2C evidence and Phase 2D "
+        "alignments: it is an auditable analytical artifact over them, and it "
+        "mutates no claim, no score and no trust verdict (ADR-010, ADR-015).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -393,6 +401,11 @@ class ResearchRun(MawhibaModel):
             raise ValueError(
                 "claim_evidence_alignment belongs to a different research run"
             )
+        if (
+            self.claim_sufficiency is not None
+            and self.claim_sufficiency.research_run_id != self.research_run_id
+        ):
+            raise ValueError("claim_sufficiency belongs to a different research run")
         return self
 
     @property
@@ -439,6 +452,16 @@ class ResearchRun(MawhibaModel):
             self.claim_evidence_alignment
             and self.claim_evidence_alignment.status
             is not ClaimAlignmentStatus.NOT_STARTED
+        )
+
+    @property
+    def claim_sufficiency_ran(self) -> bool:
+        """True once claim sufficiency executed, whatever posture it found."""
+        from src.schemas.claim_sufficiency import ClaimSufficiencyStatus
+
+        return bool(
+            self.claim_sufficiency
+            and self.claim_sufficiency.status is not ClaimSufficiencyStatus.NOT_STARTED
         )
 
     def coverage_for(self, branch: ResearchBranch) -> BranchExecutionCoverage | None:

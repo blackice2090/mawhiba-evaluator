@@ -572,6 +572,22 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "GoldComponent",
         "GoldEvidenceItem",
         "GoldScriptedResponse",
+        # Phase 2E claim sufficiency configuration: per-process policy. The
+        # versioned sufficiency POLICY is not a setting at all -- it lives in
+        # src/research/sufficiency/policy.py and is identified on every stored
+        # assessment by policy_version, which IS checkpointed.
+        "ClaimSufficiencySettings",
+        # Phase 2E claim sufficiency eval layer: offline measurement artifacts
+        # that run outside the graph and never touch a checkpoint. Phase 2E
+        # makes no model call, so there are no model-facing DTOs to exclude
+        # here -- the production contracts are all checkpoint-reachable from
+        # ResearchRun.claim_sufficiency and register automatically.
+        "ClaimSufficiencyMetrics",
+        "GoldAlignment",
+        "GoldEvidence",
+        "SufficiencyGoldCase",
+        "SufficiencyGoldDataset",
+        "SufficiencyGoldExpectation",
     }
 )
 """Types that legitimately never cross the checkpoint boundary.
