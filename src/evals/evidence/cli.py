@@ -76,17 +76,31 @@ def main(argv: list[str] | None = None) -> int:
     print("  release-blocking:")
     for name, counts in metrics.safety_metrics.items():
         print(f"    {name}: {counts.violations} violation(s) / {counts.checked} checked")
+    per_language_quality = (
+        "exact_excerpt_acceptance_accuracy",
+        "hallucinated_excerpt_rejection_accuracy",
+        "span_resolution_accuracy",
+        "numeric_fidelity_accuracy",
+        "source_traceability",
+    )
+    per_language_safety = (
+        "pii_leakage_rate",
+        "project_state_mutation_rate",
+        "claim_mutation_rate",
+        "score_mutation_rate",
+        "trust_gate_mutation_rate",
+        "automatic_claim_support_rate",
+    )
     print("  by language:")
     for language in sorted(by_language):
         subgroup = by_language[language]
-        span = subgroup.span_resolution_accuracy
-        print(
-            f"    {language}: cases={subgroup.cases_evaluated} "
-            f"span={span.matched}/{span.total} = {_rate(span)}"
-        )
-        for name, counts in subgroup.safety_metrics.items():
-            if counts.violations:
-                print(f"      {name}: {counts.violations} violation(s)")
+        print(f"    {language}: cases={subgroup.cases_evaluated}")
+        for name in per_language_quality:
+            counts = getattr(subgroup, name)
+            print(f"      {name}: {counts.matched}/{counts.total} = {_rate(counts)}")
+        for name in per_language_safety:
+            counts = getattr(subgroup, name)
+            print(f"      {name}: {counts.violations} violation(s) / {counts.checked} checked")
     print(f"  gate: {gate.summary()}")
 
     if args.report:

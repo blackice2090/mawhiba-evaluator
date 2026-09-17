@@ -24,9 +24,13 @@ offsets point somewhere the model may not have meant.
 re-checked against the verified excerpt, so 92.3% cannot be recorded as 93.2%,
 milliseconds cannot become seconds, and n=40 cannot become n=400.
 
-Matching tolerates exactly two kinds of difference, both of which are transport
-noise rather than meaning: whitespace runs and typographic quote/dash variants.
-Nothing here folds case, strips negation, normalizes digits, or touches units.
+Matching tolerates exactly two kinds of difference, both of which are pure
+transport noise rather than meaning: CRLF/LF line-ending differences, and
+repeated whitespace / line-break runs. Nothing here folds quote or dash
+variants, minus signs, scientific symbols, digits, decimal separators, units,
+comparison operators or negation. A candidate whose only match requires a
+punctuation or symbol substitution is rejected as ``EXCERPT_NOT_FOUND`` --
+trust prefers rejection over an uncertain match (Phase 2C.1).
 """
 
 from __future__ import annotations
@@ -34,7 +38,6 @@ from __future__ import annotations
 import re
 from dataclasses import dataclass, field
 
-from src.intake.anchors import normalize_unicode
 from src.schemas.evidence_extraction import (
     MAX_EVIDENCE_EXCERPT_CHARS,
     MIN_EVIDENCE_EXCERPT_CHARS,
@@ -45,17 +48,6 @@ from src.schemas.evidence_extraction import (
 )
 
 VERIFICATION_VERSION = "EVIDENCE-VERIFIER-V1"
-
-_TYPOGRAPHIC_EQUIVALENTS: dict[str, str] = {
-    "'": "'‘’′",
-    '"': '"“”″',
-    "-": "-‐‑‒–—",
-}
-"""Characters a provider, a PDF extractor and a model spell differently.
-
-Folding these cannot change which words an excerpt contains, which is the test
-every tolerance here has to pass.
-"""
 
 _NUMBER = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
 _ABSURD_EXCERPT_CHARS = MAX_EVIDENCE_EXCERPT_CHARS * 4
@@ -94,27 +86,54 @@ class NumericVerification:
 # ---------------------------------------------------------------------------
 
 
-def _tolerant_pattern(excerpt: str) -> str:
-    """A regex matching ``excerpt`` in original text, tolerating noise only.
+def _line_endings_to_lf(text: str) -> tuple[str, list[int]]:
+    """Fold CRLF/CR to LF, keeping a map back to the original offsets.
 
-    Whitespace runs become ``\\s+`` so a line break in the snapshot matches a
-    space in the candidate, and typographic variants become character classes.
-    Every other character is escaped literally -- digits, units, negation words
-    and scientific symbols all have to match exactly.
+    ``index_map[k]`` is the original index corresponding to position ``k`` of
+    the folded text; ``index_map`` carries one trailing sentinel equal to
+    ``len(text)`` so an end-of-match position always resolves.
+    """
+    folded_chars: list[str] = []
+    index_map: list[int] = []
+    i = 0
+    n = len(text)
+    while i < n:
+        if text[i] == "\r" and i + 1 < n and text[i + 1] == "\n":
+            folded_chars.append("\n")
+            index_map.append(i)
+            i += 2
+        elif text[i] == "\r":
+            folded_chars.append("\n")
+            index_map.append(i)
+            i += 1
+        else:
+            folded_chars.append(text[i])
+            index_map.append(i)
+            i += 1
+    index_map.append(n)
+    return "".join(folded_chars), index_map
+
+
+def _whitespace_pattern(excerpt: str) -> str:
+    """A regex matching ``excerpt`` in the original text, tolerating only
+    whitespace-run and line-break differences.
+
+    Every whitespace run collapses to ``\\s+`` -- so a line break in the
+    snapshot matches a space in the candidate and vice versa. Every other
+    character, including quotes, dashes, minus signs, scientific symbols,
+    digits and decimal separators, is escaped literally and must match
+    exactly.
     """
     parts: list[str] = []
     previous_was_space = False
-    for character in normalize_unicode(excerpt):
+    for character in excerpt:
         if character.isspace():
             if not previous_was_space:
                 parts.append(r"\s+")
             previous_was_space = True
             continue
         previous_was_space = False
-        equivalents = _TYPOGRAPHIC_EQUIVALENTS.get(character)
-        parts.append(
-            f"[{re.escape(equivalents)}]" if equivalents else re.escape(character)
-        )
+        parts.append(re.escape(character))
     return "".join(parts)
 
 
@@ -122,8 +141,6 @@ def _match_method(matched: str, excerpt: str) -> SpanMatchMethod:
     """How much tolerance the match actually needed."""
     if matched == excerpt:
         return SpanMatchMethod.EXACT
-    if normalize_unicode(matched) == normalize_unicode(excerpt):
-        return SpanMatchMethod.NORMALIZED_UNICODE
     return SpanMatchMethod.NORMALIZED_WHITESPACE
 
 
@@ -136,8 +153,22 @@ def _exact_occurrences(text: str, excerpt: str) -> list[tuple[int, int]]:
     return spans
 
 
-def _tolerant_occurrences(text: str, excerpt: str) -> list[tuple[int, int]]:
-    pattern = _tolerant_pattern(excerpt)
+def _line_ending_occurrences(text: str, excerpt: str) -> list[tuple[int, int]]:
+    """Exact match after folding CRLF/CR to LF on both sides, offsets mapped
+    back to the original (unfolded) snapshot text."""
+    folded_text, index_map = _line_endings_to_lf(text)
+    folded_excerpt, _ = _line_endings_to_lf(excerpt)
+    spans: list[tuple[int, int]] = []
+    start = folded_text.find(folded_excerpt)
+    while start != -1:
+        end = start + len(folded_excerpt)
+        spans.append((index_map[start], index_map[end]))
+        start = folded_text.find(folded_excerpt, start + 1)
+    return spans
+
+
+def _whitespace_occurrences(text: str, excerpt: str) -> list[tuple[int, int]]:
+    pattern = _whitespace_pattern(excerpt)
     if not pattern:
         return []
     return [(m.start(), m.end()) for m in re.finditer(pattern, text)]
@@ -148,6 +179,7 @@ def _select(
     spans: list[tuple[int, int]],
     excerpt: str,
     claimed_start: int | None,
+    method: SpanMatchMethod,
 ) -> SpanResolution:
     """Turn located occurrences into a resolution.
 
@@ -166,29 +198,62 @@ def _select(
 
     start, end = spans[0]
     matched = text[start:end]
+    resolved_method = _match_method(matched, excerpt) if method is SpanMatchMethod.EXACT else method
     return SpanResolution(
         start=start,
         end=end,
         excerpt=matched,
-        method=_match_method(matched, excerpt),
+        method=resolved_method,
     )
 
 
 def resolve_span(
     snapshot: SourceContentSnapshot, excerpt: str, claimed_start: int | None = None
 ) -> SpanResolution:
-    """Locate ``excerpt`` in the snapshot and derive its canonical offsets."""
+    """Locate ``excerpt`` in the snapshot and derive its canonical offsets.
+
+    Three escalating attempts, each recorded by ``method``:
+
+    1. EXACT -- byte-for-byte occurrence, offsets are exact.
+    2. NORMALIZED_UNICODE -- after folding CRLF/CR line endings to LF on both
+       sides, mapped back to the original snapshot offsets.
+    3. NORMALIZED_WHITESPACE -- after additionally tolerating whitespace-run
+       and line-break differences.
+
+    No stage tolerates quote, dash, minus-sign, scientific-symbol, digit or
+    unit substitution: a candidate that only matches after such a change is
+    rejected as ``EXCERPT_NOT_FOUND``, never accepted.
+    """
     if not excerpt or not excerpt.strip():
         return SpanResolution(reason=EvidenceRejectionReason.EXCERPT_NOT_FOUND)
     if len(excerpt) > _ABSURD_EXCERPT_CHARS:
         return SpanResolution(reason=EvidenceRejectionReason.EXCERPT_TOO_LONG)
 
     text = snapshot.text
-    resolution = _select(text, _exact_occurrences(text, excerpt), excerpt, claimed_start)
+
+    resolution = _select(
+        text, _exact_occurrences(text, excerpt), excerpt, claimed_start, SpanMatchMethod.EXACT
+    )
     if resolution.resolved or resolution.reason is EvidenceRejectionReason.AMBIGUOUS_SPAN:
         return resolution
 
-    return _select(text, _tolerant_occurrences(text, excerpt), excerpt, claimed_start)
+    resolution = _select(
+        text,
+        _line_ending_occurrences(text, excerpt),
+        excerpt,
+        claimed_start,
+        SpanMatchMethod.NORMALIZED_UNICODE,
+    )
+    if resolution.resolved or resolution.reason is EvidenceRejectionReason.AMBIGUOUS_SPAN:
+        return resolution
+
+    return _select(
+        text,
+        _whitespace_occurrences(text, excerpt),
+        excerpt,
+        claimed_start,
+        SpanMatchMethod.NORMALIZED_WHITESPACE,
+    )
 
 
 def check_excerpt_length(
@@ -244,7 +309,7 @@ def verify_numeric_observations(
     result = NumericVerification()
 
     for observation in observations:
-        if not _tolerant_occurrences(verified_excerpt, observation.raw_text):
+        if not _whitespace_occurrences(verified_excerpt, observation.raw_text):
             result.reason = EvidenceRejectionReason.INVALID_NUMERIC_OBSERVATION
             return NumericVerification(reason=result.reason)
 
@@ -263,7 +328,7 @@ def verify_numeric_observations(
             return NumericVerification(
                 reason=EvidenceRejectionReason.INVALID_UNIT_FIDELITY
             )
-        if observation.uncertainty and not _tolerant_occurrences(
+        if observation.uncertainty and not _whitespace_occurrences(
             verified_excerpt, observation.uncertainty
         ):
             return NumericVerification(

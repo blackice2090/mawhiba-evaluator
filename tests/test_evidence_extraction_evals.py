@@ -36,6 +36,11 @@ from src.schemas.evidence_extraction import (
 )
 
 MINIMUM_GOLD_CASES = 60
+MINIMUM_TOTAL_CASES_V1_1 = 80
+"""Phase 2C.1 §3: the multilingual-hardening floor, stricter than the
+original MINIMUM_GOLD_CASES."""
+MINIMUM_ARABIC_CASES = 8
+MINIMUM_MIXED_CASES = 4
 
 REQUIRED_CATEGORIES = {
     "exact_abstract_excerpt",
@@ -134,6 +139,42 @@ def test_the_dataset_is_meaningfully_multilingual(dataset) -> None:
     assert counts.get("en", 0) >= 1
     assert counts.get("ar", 0) >= 1
     assert counts.get("mixed", 0) >= 1
+
+
+def test_the_dataset_meets_phase2c1_multilingual_minimums(dataset) -> None:
+    """Phase 2C.1 §3: the pre-hardening distribution (en=66, ar=3, mixed=1)
+    was too thin for a meaningful multilingual trust evaluation."""
+    counts = dataset.language_counts
+    assert len(dataset.cases) >= MINIMUM_TOTAL_CASES_V1_1
+    assert counts.get("ar", 0) >= MINIMUM_ARABIC_CASES
+    assert counts.get("mixed", 0) >= MINIMUM_MIXED_CASES
+
+
+def test_arabic_and_mixed_cases_cover_required_trust_behaviors(dataset) -> None:
+    """Phase 2C.1 §3: Arabic/mixed content must exercise the same trust
+    surface as English, not just prove the script can echo Arabic text."""
+    non_english = [c for c in dataset.cases if c.language in ("ar", "mixed")]
+    categories = {cat for c in non_english for cat in c.categories}
+    required_substrings = (
+        "negation",
+        "numeric",
+        "hallucination",
+        "limitation_result_distinction",
+        "prompt_injection",
+        "technical_terminology",
+        "whitespace_span",
+    )
+    for substring in required_substrings:
+        assert any(substring in cat for cat in categories), (
+            f"no ar/mixed Gold case covers {substring!r}: {sorted(categories)}"
+        )
+    # A valid, non-adversarial exact-evidence case in both ar and mixed.
+    assert any(
+        c.language == "ar" and c.expected.accepted_excerpts for c in dataset.cases
+    )
+    assert any(
+        c.language == "mixed" and c.expected.accepted_excerpts for c in dataset.cases
+    )
 
 
 def test_case_structure_is_english_even_where_content_is_not(dataset) -> None:

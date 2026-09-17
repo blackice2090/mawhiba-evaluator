@@ -59,7 +59,9 @@ from src.research.inputs import project_state_fingerprint
 from src.research.planner import PLANNER_VERSION
 from src.research.settings import ResearchSettings
 from src.schemas.academic import AcademicProvider, AcademicSourceType
-from src.schemas.common import new_source_id
+from src.schemas.claim import ClaimOrigin, ClaimRecord, ClaimStatus, ClaimType
+from src.schemas.common import EvaluationStatus, new_source_id
+from src.schemas.trust import BlockerCode, TrustBlocker, TrustGateResult
 from src.schemas.evidence_extraction import (
     CONTENT_KIND_TO_SCOPE,
     ContentKind,
@@ -457,6 +459,67 @@ def test_whitespace_and_line_breaks_are_tolerated_but_meaning_is_not() -> None:
     assert resolve_span(
         snapshot, S_NEG.replace("did not improve", "improved")
     ).reason is EvidenceRejectionReason.EXCERPT_NOT_FOUND
+
+
+def test_crlf_line_endings_are_tolerated_and_offsets_map_to_the_original() -> None:
+    text = f"{S_INTRO}\r\n{S_NEG}\r\n{S_LAT}"
+    snapshot = _snapshot(text)
+    span = resolve_span(snapshot, f"{S_INTRO}\n{S_NEG}")
+    assert span.method is SpanMatchMethod.NORMALIZED_UNICODE
+    assert snapshot.text[span.start : span.end] == f"{S_INTRO}\r\n{S_NEG}"
+
+
+def test_minus_sign_is_not_folded_to_hyphen() -> None:
+    snapshot = _snapshot("The offset was measured as -5 units below baseline.")
+    assert resolve_span(snapshot, "measured as -5 units").method is SpanMatchMethod.EXACT
+    assert resolve_span(
+        snapshot, "measured as −5 units"
+    ).reason is EvidenceRejectionReason.EXCERPT_NOT_FOUND
+
+
+def test_numeric_range_dash_is_not_folded() -> None:
+    snapshot = _snapshot("Accuracy improved across the 5-10 epoch window.")
+    assert resolve_span(snapshot, "the 5-10 epoch window").method is SpanMatchMethod.EXACT
+    assert resolve_span(
+        snapshot, "the 5–10 epoch window"
+    ).reason is EvidenceRejectionReason.EXCERPT_NOT_FOUND
+
+
+def test_curly_quote_is_not_folded_to_straight_quote() -> None:
+    snapshot = _snapshot('The authors describe this as "state of the art".')
+    assert resolve_span(
+        snapshot, 'describe this as "state of the art"'
+    ).method is SpanMatchMethod.EXACT
+    assert resolve_span(
+        snapshot, "describe this as “state of the art”"
+    ).reason is EvidenceRejectionReason.EXCERPT_NOT_FOUND
+
+
+def test_apostrophe_variant_is_not_folded() -> None:
+    snapshot = _snapshot("The model's recall did not change across folds.")
+    assert resolve_span(snapshot, "The model's recall").method is SpanMatchMethod.EXACT
+    assert resolve_span(
+        snapshot, "The model’s recall"
+    ).reason is EvidenceRejectionReason.EXCERPT_NOT_FOUND
+
+
+def test_scientific_symbol_mismatch_is_rejected() -> None:
+    snapshot = _snapshot("The sensor operated at 25°C during the trial.")
+    assert resolve_span(
+        snapshot, "operated at 25°C during"
+    ).method is SpanMatchMethod.EXACT
+    assert resolve_span(
+        snapshot, "operated at 25C during"
+    ).reason is EvidenceRejectionReason.EXCERPT_NOT_FOUND
+
+
+def test_accepted_evidence_is_always_a_character_for_character_slice() -> None:
+    text = f"{S_INTRO}\r\n{S_NEG}"
+    snapshot = _snapshot(text)
+    for excerpt in (S_NEG, f"{S_INTRO} {S_NEG}", f"{S_INTRO}\n{S_NEG}"):
+        span = resolve_span(snapshot, excerpt)
+        assert span.resolved
+        assert span.excerpt == snapshot.text[span.start : span.end]
 
 
 def test_excerpt_bounds_are_enforced_on_the_verified_text() -> None:
@@ -1029,3 +1092,209 @@ def test_the_evidence_graph_makes_no_network_call(app, monkeypatch) -> None:
         _config(_scripted({"evidence_type": "LIMITATION", "verbatim_excerpt": S_NEG})),
     )
     assert state.status is WorkflowStatus.COMPLETED
+
+
+# ===========================================================================
+# Phase 2C.1 -- populated-state immutability
+# ===========================================================================
+
+
+def _populated_project() -> ProjectState:
+    """A non-empty, valid ProjectState: existing claims (including one
+    CONTRADICTED claim with counter-evidence), a score, a trust gate and a
+    non-default evaluation_status -- everything Phase 2C must leave untouched.
+    """
+    from tests.fixtures.projects import fixture_b_complete_engineering_project
+
+    project = fixture_b_complete_engineering_project()
+    contradicted = ClaimRecord(
+        claim_id="C-004",
+        claim="The correlator generalizes to pipes above DN200.",
+        claim_type=ClaimType.FEASIBILITY,
+        origin=ClaimOrigin.STUDENT,
+        status=ClaimStatus.CONTRADICTED,
+        counter_evidence_ids=["E-004"],
+        confidence=0.15,
+    )
+    gate = TrustGateResult(
+        search_coverage=0.8,
+        source_quality=0.75,
+        claim_traceability=0.9,
+        contradictions_resolved=True,
+        novelty_search_complete=True,
+        methodology_review_complete=True,
+        red_team_complete=False,
+        closest_prior_art_identified=True,
+        sources_verified=True,
+        official_requirements_checked=True,
+        final_verifier_passed=False,
+        score_status=EvaluationStatus.PROVISIONAL,
+        finalization_allowed=False,
+        blockers=[
+            TrustBlocker(
+                code=BlockerCode.RED_TEAM_INCOMPLETE,
+                detail="Red team pass has not been run yet.",
+            )
+        ],
+    )
+    return project.model_copy(
+        update={
+            "claims": [*project.claims, contradicted],
+            "trust_gate": gate,
+        }
+    )
+
+
+def test_populated_state_survives_the_phase2c_graph_untouched(app) -> None:
+    """Phase 2C.1 §1: a populated ProjectState, not only an empty one, must be
+    byte-for-byte preserved by the evidence-extraction graph."""
+    project = _populated_project()
+    before, before_hash = project.model_dump(), project_state_fingerprint(project)
+
+    state = _invoke(
+        app,
+        project,
+        _run(project),
+        _config(
+            _scripted(
+                {
+                    "evidence_type": "LIMITATION",
+                    "verbatim_excerpt": S_NEG,
+                    "interpretation": "This fully supports claim C-001.",
+                }
+            )
+        ),
+    )
+
+    after = state.project.model_dump()
+    assert after == before
+    assert project_state_fingerprint(state.project) == before_hash
+
+    assert [c.claim_id for c in state.project.claims] == [c.claim_id for c in project.claims]
+    for before_claim, after_claim in zip(project.claims, state.project.claims):
+        assert after_claim.claim == before_claim.claim
+        assert after_claim.status == before_claim.status
+        assert after_claim.confidence == before_claim.confidence
+        assert after_claim.evidence_ids == before_claim.evidence_ids
+        assert after_claim.counter_evidence_ids == before_claim.counter_evidence_ids
+
+    assert state.project.scores == project.scores
+    assert state.project.trust_gate == project.trust_gate
+    assert state.project.evaluation_status == project.evaluation_status
+
+    # The graph still does real work on the research-layer state.
+    assert state.active_research_run.evidence_extraction.verified_evidence
+
+
+def test_populated_state_survives_checkpoint_persistence_round_trip(app) -> None:
+    """Phase 2C.1 §1: the populated-state guarantee must also hold after a
+    LangGraph checkpoint save/restore, not only in the in-memory return value.
+    """
+    project = _populated_project()
+    before = project.model_dump()
+    run = _run(project)
+    config = _config(_scripted({"evidence_type": "LIMITATION", "verbatim_excerpt": S_NEG}))
+
+    _invoke(app, project, run, config)
+    restored = coerce_graph_state(app.get_state(config).values)
+
+    assert restored.project.model_dump() == before
+    assert restored.project.claims == project.claims
+    assert restored.project.scores == project.scores
+    assert restored.project.trust_gate == project.trust_gate
+    assert restored.project.evaluation_status == project.evaluation_status
+
+    # Independently, the generic serializer round-trip must also be lossless.
+    serde = build_serializer()
+    with audit_serde_registration() as events:
+        reloaded = serde.loads_typed(serde.dumps_typed(restored))
+    assert unregistered_type_keys(events) == set()
+    assert reloaded.project.model_dump() == before
+
+
+def test_populated_state_negative_control_claim_status_mutation_detected() -> None:
+    """If something mutated an existing claim's status, the equality guard
+    used above must catch it."""
+    project = _populated_project()
+    before = project.model_dump()
+    mutated_claim = project.claims[0].model_copy(
+        update={"status": ClaimStatus.PLAUSIBLE}
+    )
+    mutated = project.model_copy(
+        update={"claims": [mutated_claim, *project.claims[1:]]}
+    )
+    assert mutated.model_dump() != before
+    assert mutated.claims[0].status != project.claims[0].status
+
+
+def test_populated_state_negative_control_claim_confidence_mutation_detected() -> None:
+    project = _populated_project()
+    before = project.model_dump()
+    mutated_claim = project.claims[0].model_copy(update={"confidence": 0.01})
+    mutated = project.model_copy(
+        update={"claims": [mutated_claim, *project.claims[1:]]}
+    )
+    assert mutated.model_dump() != before
+    assert mutated.claims[0].confidence != project.claims[0].confidence
+
+
+def test_populated_state_negative_control_evidence_reference_mutation_detected() -> None:
+    project = _populated_project()
+    before = project.model_dump()
+    # Removing an existing evidence reference from a claim.
+    mutated_claim = project.claims[0].model_copy(update={"evidence_ids": []})
+    mutated = project.model_copy(
+        update={"claims": [mutated_claim, *project.claims[1:]]}
+    )
+    assert mutated.model_dump() != before
+    assert mutated.claims[0].evidence_ids != project.claims[0].evidence_ids
+
+    # Adding a counter-evidence reference that was not there before.
+    contradicted = project.claims[-1]
+    assert contradicted.claim_id == "C-004"
+    added = contradicted.model_copy(
+        update={"counter_evidence_ids": [*contradicted.counter_evidence_ids, "E-001"]}
+    )
+    mutated2 = project.model_copy(update={"claims": [*project.claims[:-1], added]})
+    assert mutated2.model_dump() != before
+    assert mutated2.claims[-1].counter_evidence_ids != contradicted.counter_evidence_ids
+
+
+def test_populated_state_negative_control_score_value_mutation_detected() -> None:
+    project = _populated_project()
+    before = project.model_dump()
+    original_score = project.scores[0]
+    mutated_axis = original_score.axes[0].model_copy(
+        update={"score": 0 if original_score.axes[0].score != 0 else 5}
+    )
+    mutated_score = original_score.model_copy(
+        update={"axes": [mutated_axis, *original_score.axes[1:]]}
+    )
+    mutated = project.model_copy(update={"scores": [mutated_score]})
+    assert mutated.model_dump() != before
+    assert mutated.scores[0].axes[0].score != original_score.axes[0].score
+
+
+def test_populated_state_negative_control_trust_gate_mutation_detected() -> None:
+    project = _populated_project()
+    before = project.model_dump()
+    mutated_gate = project.trust_gate.model_copy(
+        update={"finalization_allowed": False, "blockers": [], "search_coverage": 0.99}
+    )
+    mutated = project.model_copy(update={"trust_gate": mutated_gate})
+    assert mutated.model_dump() != before
+    assert mutated.trust_gate != project.trust_gate
+
+    # Replacing the trust gate outright must also be caught.
+    replaced = project.model_copy(update={"trust_gate": None})
+    assert replaced.model_dump() != before
+    assert replaced.trust_gate != project.trust_gate
+
+
+def test_populated_state_negative_control_evaluation_status_mutation_detected() -> None:
+    project = _populated_project()
+    before = project.model_dump()
+    assert project.evaluation_status == EvaluationStatus.PROVISIONAL
+    mutated = project.model_copy(update={"evaluation_status": EvaluationStatus.FINAL})
+    assert mutated.model_dump() != before
+    assert mutated.evaluation_status != project.evaluation_status

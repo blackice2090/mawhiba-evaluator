@@ -66,9 +66,15 @@ Implemented so that the guarantee is structural rather than procedural:
 4. **Ambiguity is refused.** One sentence appearing twice with nothing
    deterministic to separate the occurrences yields `AMBIGUOUS_SPAN`. Taking the
    first would produce evidence pointing somewhere the model may not have meant.
-5. **Tolerance is limited to transport noise.** Whitespace runs and typographic
-   quote/dash variants may differ. Nothing folds case, strips negation,
-   normalizes digits or touches units — and the accepted excerpt is still the
+5. **Tolerance is limited to transport noise (tightened in Phase 2C.1).**
+   Only CRLF/LF line-ending differences and whitespace-run/line-break
+   differences may vary between excerpt and source. Typographic quote and
+   dash variants, minus signs, scientific symbols, digits, decimal
+   separators, units, comparison operators and negation are never folded or
+   equated — a candidate that only matches after such a substitution is
+   rejected as `EXCERPT_NOT_FOUND`, not accepted. Trust prefers rejection
+   over an uncertain match. Nothing folds case, strips negation, normalizes
+   digits or touches units — and the accepted excerpt is still the
    snapshot's own text, so tolerance affects the *search*, never the result.
 6. **Numbers are re-checked against the verified excerpt.** A stated value must
    appear as written, and a unit must appear as its own token, so 92.3% cannot

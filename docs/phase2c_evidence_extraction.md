@@ -213,18 +213,23 @@ Resolution order:
 2. **Several exact matches** → a claimed offset may select one, but only by
    exactly equalling an occurrence code has already proven. Otherwise
    `AMBIGUOUS_SPAN` — refused, never guessed.
-3. **No exact match** → a whitespace- and typography-tolerant search over the
-   **original** text, which yields exact original offsets. The method is recorded
-   as `NORMALIZED_UNICODE` or `NORMALIZED_WHITESPACE`.
-4. **Nothing found** → `EXCERPT_NOT_FOUND`.
+3. **No exact match** → a CRLF/LF-line-ending-tolerant search over the
+   **original** text (`NORMALIZED_UNICODE`), with offsets mapped back to the
+   original, unfolded snapshot.
+4. **Still no match** → a whitespace-run/line-break-tolerant search
+   (`NORMALIZED_WHITESPACE`) over the original text, which already yields
+   exact original offsets.
+5. **Nothing found** → `EXCERPT_NOT_FOUND`.
 
-### Whitespace policy
+### Whitespace policy (tightened in Phase 2C.1)
 
-Tolerated: runs of whitespace (so a line break matches a space) and typographic
-quote/dash variants. **Never** tolerated: case folding, digit normalization,
-unit changes, negation removal, or any change to scientific symbols. The
-accepted excerpt is the snapshot's own text regardless, so tolerance affects the
-*search* and never the result.
+Tolerated: CRLF/LF line-ending differences, and runs of whitespace (so a line
+break matches a space). **Never** tolerated: typographic quote/dash variants,
+minus signs, scientific symbols, digits, decimal separators, units, comparison
+operators, negation, or case folding. A candidate whose only match requires one
+of these substitutions is rejected as `EXCERPT_NOT_FOUND` — trust prefers
+rejection over an uncertain match. The accepted excerpt is the snapshot's own
+text regardless, so tolerance affects the *search* and never the result.
 
 ### Quote length
 
