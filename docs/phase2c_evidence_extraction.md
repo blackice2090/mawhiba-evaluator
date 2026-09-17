@@ -478,7 +478,7 @@ EVIDENCE-EXTRACTION-CONTRACT-V1   contract_version
 CONTENT-SNAPSHOT-V1               content_snapshot_version
 V1                                extractor_prompt_version
 EVIDENCE-EXTRACTOR-V1             extractor_version
-EVIDENCE-VERIFIER-V1              verifier_version
+EVIDENCE-VERIFIER-V2              verifier_version
 EVIDENCE-CHUNKER-V1               chunker_version
 v1                                eval dataset_version
 ```

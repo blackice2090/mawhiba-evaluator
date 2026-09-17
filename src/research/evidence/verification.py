@@ -47,7 +47,7 @@ from src.schemas.evidence_extraction import (
     SpanMatchMethod,
 )
 
-VERIFICATION_VERSION = "EVIDENCE-VERIFIER-V1"
+VERIFICATION_VERSION = "EVIDENCE-VERIFIER-V2"
 
 _NUMBER = re.compile(r"[-+]?\d[\d,]*(?:\.\d+)?")
 _ABSURD_EXCERPT_CHARS = MAX_EVIDENCE_EXCERPT_CHARS * 4

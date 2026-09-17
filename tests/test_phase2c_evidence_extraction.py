@@ -1032,7 +1032,7 @@ def test_versions_are_recorded_for_reproducibility(app) -> None:
     assert extraction.contract_version == "EVIDENCE-EXTRACTION-CONTRACT-V1"
     assert extraction.content_snapshot_version == "CONTENT-SNAPSHOT-V1"
     assert extraction.extractor_prompt_version == "V1"
-    assert extraction.verifier_version == "EVIDENCE-VERIFIER-V1"
+    assert extraction.verifier_version == "EVIDENCE-VERIFIER-V2"
     assert extraction.chunker_version == "EVIDENCE-CHUNKER-V1"
     evidence = extraction.verified_evidence[0]
     assert evidence.extractor_version and evidence.verifier_version
