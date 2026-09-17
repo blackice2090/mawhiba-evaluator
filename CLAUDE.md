@@ -43,6 +43,9 @@ Python 3.12+ is required. A local venv is at `.venv`.
 # Claim-evidence alignment eval (deterministic, fake provider)
 ./.venv/Scripts/python.exe -m src.evals.claim_alignment.cli
 
+# Claim sufficiency eval (deterministic, no model at all)
+./.venv/Scripts/python.exe -m src.evals.claim_sufficiency.cli
+
 # Live evals / live integration tests -- NEVER run these without being asked
 RUN_OPENAI_INTAKE_EVALS=1 ./.venv/Scripts/python.exe -m src.evals.cli --live
 RUN_OPENAI_INTEGRATION_TESTS=1 ./.venv/Scripts/python.exe -m pytest tests/test_openai_integration.py
@@ -151,6 +154,9 @@ until one of the two is true — that is the intended workflow, not an obstacle.
 - `build_phase2c_evidence_graph()` — trusted evidence extraction. One model call
   per content snapshot; everything it returns is verified deterministically
   against the snapshot text. Also leaves the run non-terminal.
+- `build_phase2e_claim_sufficiency_graph()` — claim sufficiency and evidence
+  weighting over Phase 2D alignments. Fully deterministic: it takes **no model
+  provider**, makes no model call, and also leaves the run non-terminal.
 - The provider is injected per run via
   `config["configurable"]["structured_model_provider"]`, which is what keeps graph
   construction credential-free and tests deterministic.
@@ -198,6 +204,16 @@ every judgement from the snapshot text independently of the verifier, and
 negative controls prove each gate can fire. Six quality metrics must be exactly
 1.0, and eleven release-blocking metrics must be zero.
 
+`evals/claim_sufficiency/v1/cases.jsonl` — 147 Gold cases, schema in
+`evals/claim_sufficiency/v1/schema.md`. Each case describes a whole synthetic
+upstream world (claims, Phase 2B sources with identifiers, Phase 2C evidence,
+Phase 2D alignments) and is driven through the real Phase 2E graph. There is no
+scripted model output because Phase 2E makes no model call; the adversarial
+surface is the input *shape*. The scorer re-derives the independence partition
+from the fixture's own identifiers, independently of the code it grades. Ten
+quality metrics must be exactly 1.0 and thirty-three release-blocking metrics
+must be zero.
+
 The approved baseline (`evals/intake/baselines/v1.json`) is never overwritten
 automatically — `write_baseline(..., approve=True)` or `--approve-baseline` is
 required. Reports go to the git-ignored `eval_reports/`.
@@ -237,12 +253,13 @@ not obvious from the code.
 - `docs/phase2b_academic_research_connectors.md` — academic connectors, identity resolution, merge policy, evals
 - `docs/phase2c_evidence_extraction.md` — content snapshots, verbatim verification, numeric fidelity, evidence evals
 - `docs/phase2d_claim_evidence_alignment.md` — relationship taxonomy, claim anchors, alignment evals
-- `docs/adr/ADR-0{01..14}-*.md` — decisions and their rejected alternatives
+- `docs/phase2e_claim_sufficiency.md` — independence grouping, evidence weight profiles, sufficiency policy, sufficiency evals
+- `docs/adr/ADR-0{01..15}-*.md` — decisions and their rejected alternatives
 
 ## Phase discipline
 
 Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A, 2A.1, 2B, 2B.1,
-2B.2, 2C, 2D). Phase 2A
+2B.2, 2C, 2D, 2E). Phase 2A
 added the research foundation: `ResearchRun` on graph state (never in
 `ProjectState`), verified query planning, and official Mawhiba requirements
 retrieval (`build_phase2a_research_graph()`). Research planning must never write
@@ -288,6 +305,27 @@ consistency, and provenance, but never the underlying semantic correctness.
 Phase 2D **cannot** mutate a claim's status, confidence, `evidence_ids` or
 `counter_evidence_ids` — those fields do not exist on `ClaimEvidenceAlignment`
 (ADR-014). Claim-evidence alignment is not claim verification.
+
+Phase 2E added claim sufficiency and evidence weighting. `ClaimSufficiencyRun`
+lives on the `ResearchRun`, never in `ProjectState` (ADR-010). Sufficiency is
+**multi-dimensional and never one opaque scalar** — there is no
+`evidence_weight: float` anywhere, and a test asserts no numeric field appears
+on the Phase 2E contracts (ADR-015). Corroboration is counted in
+`IndependenceGroup`s keyed on Phase 2B's `SourceFingerprint.logical_key`, so
+three providers returning one DOI is one study and five excerpts from one
+abstract is one study; multiple excerpts may improve component coverage but can
+never raise the independent-source count. Source quality (retraction,
+publication form, traceability, scope) stays separate from semantic relation,
+which is claim-specific. `UNKNOWN` retraction and publication status are
+first-class and never read as favorable. Retracted evidence stays visible as
+`DISQUALIFIED_RETRACTED` and never corroborates. Phase 2E **cannot** mutate
+claim status, confidence, `evidence_ids`, `counter_evidence_ids`, scores,
+`trust_gate` or `evaluation_status` — none of those fields exists on any
+Phase 2E type. It is **fully deterministic by design**: no model call, no
+provider seam, no prompt version, documented as intentional in ADR-015. Only a
+`COMPLETED` Phase 2D run yields assessments; `PARTIAL` and
+`BLOCKED_PAIR_LIMIT_EXCEEDED` become `BLOCKED_ALIGNMENT_INCOMPLETE` rather than
+sufficiency over an alignment universe nobody examined.
 
 Novelty analysis, the scoring engine, Red Team, report generation, the patent
 / product / open-source / standards connectors, full-text acquisition, the

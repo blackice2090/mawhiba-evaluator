@@ -169,6 +169,25 @@ class ClaimAlignmentSettings(MawhibaModel):
     max_pairs_per_run: int = Field(default=500, ge=1, le=20000)
 
 
+class ClaimSufficiencySettings(MawhibaModel):
+    """Phase 2E policy knobs.
+
+    Deliberately tiny. The sufficiency thresholds themselves are NOT settings:
+    they are the versioned policy in ``src.research.sufficiency.policy``, and
+    making them tunable per run would mean two archived assessments could carry
+    the same ``policy_version`` while having applied different bars (section 28).
+    """
+
+    max_claims_per_run: int = Field(
+        default=200,
+        ge=1,
+        le=5000,
+        description="Safety bound on how many claims one pass assesses. The pass "
+        "is deterministic and makes no model call, so this guards state size "
+        "rather than cost.",
+    )
+
+
 class ResearchSettings(MawhibaModel):
     limits: QueryPlanLimits = Field(default_factory=QueryPlanLimits)
     official: OfficialRequirementsSettings = Field(default_factory=OfficialRequirementsSettings)
@@ -177,6 +196,9 @@ class ResearchSettings(MawhibaModel):
         default_factory=EvidenceExtractionSettings
     )
     alignment: ClaimAlignmentSettings = Field(default_factory=ClaimAlignmentSettings)
+    sufficiency: ClaimSufficiencySettings = Field(
+        default_factory=ClaimSufficiencySettings
+    )
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()
