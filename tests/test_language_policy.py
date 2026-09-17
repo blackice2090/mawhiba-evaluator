@@ -73,6 +73,15 @@ ARABIC_AS_DATA: dict[Path, str] = {
     / "academic_retrieval"
     / "v1"
     / "cases.jsonl": "synthetic Arabic and mixed-language academic queries and paper titles",
+    PROJECT_ROOT
+    / "tests"
+    / "test_phase2c_evidence_extraction.py": "synthetic Arabic source content proving "
+                                             "an Arabic excerpt verifies to exact offsets",
+    PROJECT_ROOT
+    / "evals"
+    / "evidence_extraction"
+    / "v1"
+    / "cases.jsonl": "synthetic Arabic and mixed-language source abstracts",
 }
 
 FILES_ALLOWED_TO_QUOTE_ARABIC = set(ARABIC_AS_DATA)

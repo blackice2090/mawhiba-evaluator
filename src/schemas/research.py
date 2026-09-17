@@ -18,6 +18,7 @@ from uuid import UUID, uuid4
 from pydantic import ConfigDict, Field, model_validator
 
 from src.schemas.academic import AcademicRetrievalResult
+from src.schemas.evidence_extraction import EvidenceExtractionRun
 from src.schemas.common import (
     MawhibaModel,
     QueryPurpose,
@@ -336,6 +337,13 @@ class ResearchRun(MawhibaModel):
         "ProjectState: retrieval reads canonical state through the verified "
         "query plan and writes none of it (ADR-006, ADR-010).",
     )
+    evidence_extraction: EvidenceExtractionRun | None = Field(
+        default=None,
+        description="Phase 2C extracted evidence. Also on the run rather than in "
+        "ProjectState.evidence: a canonical EvidenceRecord must reference a "
+        "source inside ProjectState.sources, and verified academic sources "
+        "deliberately live here instead (ADR-010, ADR-012).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -365,6 +373,11 @@ class ResearchRun(MawhibaModel):
             and self.academic_research.research_run_id != self.research_run_id
         ):
             raise ValueError("academic_research belongs to a different research run")
+        if (
+            self.evidence_extraction is not None
+            and self.evidence_extraction.research_run_id != self.research_run_id
+        ):
+            raise ValueError("evidence_extraction belongs to a different research run")
         return self
 
     @property
@@ -390,6 +403,16 @@ class ResearchRun(MawhibaModel):
         return bool(
             self.academic_research
             and self.academic_research.outcome is not AcademicBranchOutcome.NOT_RUN
+        )
+
+    @property
+    def evidence_extraction_ran(self) -> bool:
+        """True once evidence extraction executed, whatever it found."""
+        from src.schemas.evidence_extraction import EvidenceExtractionStatus
+
+        return bool(
+            self.evidence_extraction
+            and self.evidence_extraction.status is not EvidenceExtractionStatus.NOT_STARTED
         )
 
     def coverage_for(self, branch: ResearchBranch) -> BranchExecutionCoverage | None:
