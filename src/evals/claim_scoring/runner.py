@@ -723,6 +723,8 @@ def score_scoring_case(
 
     scoring = outcome.scoring_run
     if scoring is None:
+        # No scoring run at all where one was expected: the strongest form of
+        # an unusable Phase 2E input reaching this phase.
         metrics.invalid_sufficiency_assessment_acceptance_rate.record(True)
         return
 
@@ -982,6 +984,19 @@ def score_scoring_case(
             and card.assessment_id == source.assessment_id
             and card.sufficiency_outcome is source.outcome
             and card.inventory_completeness is source.inventory_completeness
+        )
+        # Every scorecard must reconcile to an assessment that actually exists
+        # in this run, under this run's sufficiency id. Recorded on every card
+        # rather than only on failure, so the gate has a denominator: a gate
+        # that can only ever count a violation is a gate nobody ever checked.
+        known_assessments = {a.assessment_id for a in assessment}
+        metrics.invalid_sufficiency_assessment_acceptance_rate.record(
+            card.assessment_id not in known_assessments
+            or (
+                outcome.sufficiency_run is not None
+                and card.sufficiency_run_id
+                != outcome.sufficiency_run.sufficiency_run_id
+            )
         )
         metrics.policy_version_accuracy.add(
             card.policy_version == CLAIM_EVIDENCE_SCORING_POLICY_VERSION
