@@ -12,6 +12,23 @@ supporting paper, an alignment whose evidence is not in the run, a Phase 2D run
 that never finished. Those are the shapes that would silently inflate
 corroboration or assert sufficiency over evidence nobody examined.
 
+## Claim-component completeness (Phase 2E.1)
+
+Under `COMPONENT-PARTITION-STRATEGY-V1` the material component set is a covering
+partition of the claim's own text, so a case's *claim text* and its *anchor
+texts* together determine the denominator (ADR-016). Two consequences matter
+when reading or writing a case:
+
+- An anchor naming the whole proposition yields one material component, so a
+  case about full sufficiency anchors the whole claim.
+- A sub-phrase anchor leaves the rest of the claim as an
+  `UNANCHORED_CLAIM_REMAINDER` component with `NO_EVIDENCE`, so the claim cannot
+  be `SUFFICIENT_SUPPORT`. The compound claims here use a comma between
+  components precisely so that both anchors together cover every material
+  character and full coverage stays reachable.
+- The partition cuts only at anchor boundaries, so two adjacent unexamined
+  stretches merge into one remainder component. Coarser, never smaller.
+
 **Expectations are authored from the described input alone** — what
 `SUFFICIENCY-POLICY-V1` must conclude given these claims, these sources and
 these relations. Never by running the code and blessing its answer.
@@ -77,6 +94,7 @@ excerpt value positions, and is never translated.
 | `components` | `[{text, judgment}]`. **`text` must occur verbatim in the claim**; offsets are derived by code, so a case cannot encode an anchor that does not exist. Component judgments must satisfy Phase 2D's own relation-consistency rule. |
 | `foreign_run` | Build the alignment under a different research run id. Requires `direct_mode`, because a run record rightly refuses it. |
 | `hash_mismatch` | Record a content hash that does not match the evidence, so the alignment was verified against different bytes. |
+| `fabricated_anchor` | Claim text that does **not** occur in the claim, recorded as a component anchor at offset 0. Phase 2D could not produce this; Phase 2E.1 must refuse it rather than assume upstream verification held (ADR-016). |
 
 One `(claim_id, evidence)` pair may carry at most one alignment.
 
@@ -100,6 +118,9 @@ asserts exactly what it was written to assert.
 | `content_scope_ceiling` | `claim_id -> scope value, or the string `NONE`` when nothing contributed. |
 | `duplicate_evidence_collapsed` | Expected collapse count: evidence items beyond the first in their group. |
 | `assessments_total` | Expected number of assessments. |
+| `inventory_completeness` | `claim_id -> COMPLETE` \| `INCOMPLETE` \| `UNKNOWN`. `UNKNOWN` is never interchangeable with `COMPLETE`. |
+| `unexamined_components` | `claim_id -> count of material claim components no alignment anchor reached`. Zero is an assertion, not a default. |
+| `component_origins` | `claim_id -> [ComponentOrigin]`, in component order. |
 
 ## Coverage minimums (asserted by tests)
 
@@ -107,6 +128,8 @@ asserts exactly what it was written to assert.
 - ≥ 24 Arabic, ≥ 16 mixed
 - every `SufficiencyOutcome` value covered
 - each of the 48 required adversarial/behaviour categories present
+- each of the 20 required Phase 2E.1 claim-component-completeness categories
+  present
 
 ## What the eval proves, and what it does not
 

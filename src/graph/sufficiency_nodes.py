@@ -40,6 +40,7 @@ from src.research.sufficiency.pipeline import (
 )
 from src.schemas.claim_sufficiency import (
     ClaimSufficiencyRun,
+    ComponentCoverage,
     ClaimSufficiencyStatus,
     SufficiencyIssue,
     SufficiencyIssueCode,
@@ -370,13 +371,61 @@ def build_evidence_weight_profiles(
     )
 
 
+def build_claim_component_inventory(
+    state: EvaluationGraphState, config: RunnableConfig
+) -> dict[str, Any]:
+    """Establish the complete material component set of every assessed claim.
+
+    The Phase 2E.1 release-critical step (ADR-016). Each inventory is a verified
+    covering partition of the claim's own text, so a material part of a compound
+    claim that no Phase 2D alignment anchored is present as an
+    ``UNANCHORED_CLAIM_REMAINDER`` component rather than absent from the
+    denominator. Recomputed from state and reported here; the inventories are
+    stored on the assessments that ``APPLY_SUFFICIENCY_POLICY`` writes, because
+    an inventory is part of the verdict it produced and must never drift from it.
+    """
+    node = NodeId.BUILD_CLAIM_COMPONENT_INVENTORY
+    started_at = workflow_now()
+    run = _require_run(state)
+    sufficiency = _open_sufficiency(state)
+    if sufficiency is None:
+        return _done(
+            state, node, started_at, "No open sufficiency run.", status=NodeStatus.SKIPPED
+        )
+
+    _, assessments = _assess(state, run, sufficiency, config)
+    complete = sum(1 for a in assessments if a.component_inventory.is_complete)
+    unexamined = sum(a.unexamined_component_count for a in assessments)
+    warnings: list[str] = []
+    if complete != len(assessments):
+        warnings.append(
+            f"{len(assessments) - complete} claim(s) have a component inventory "
+            "that is not COMPLETE; full sufficiency is unavailable for them."
+        )
+    if unexamined:
+        warnings.append(
+            f"{unexamined} material claim component(s) were never anchored by any "
+            "alignment and remain unexamined."
+        )
+    return _done(
+        state,
+        node,
+        started_at,
+        f"Built component inventories for {len(assessments)} claim(s); "
+        f"{complete} COMPLETE; {unexamined} material component(s) unexamined.",
+        warnings=warnings,
+    )
+
+
 def aggregate_claim_component_coverage(
     state: EvaluationGraphState, config: RunnableConfig
 ) -> dict[str, Any]:
-    """Aggregate per-component coverage at the exact Phase 2D anchors.
+    """Aggregate per-component coverage over the verified component inventory.
 
     Reported here and stored with the assessments: a component's coverage is
     part of its claim's assessment record, never a free-floating judgement.
+    Every inventory component gets a coverage state, including the ones no
+    alignment anchor reached -- those leave as ``NO_EVIDENCE`` and stay visible.
     """
     node = NodeId.AGGREGATE_CLAIM_COMPONENT_COVERAGE
     started_at = workflow_now()
@@ -392,12 +441,19 @@ def aggregate_claim_component_coverage(
     adequate = sum(
         1 for a in assessments for c in a.components if c.is_adequately_evidenced
     )
+    no_evidence = sum(
+        1
+        for a in assessments
+        for c in a.components
+        if c.coverage is ComponentCoverage.NO_EVIDENCE
+    )
     return _done(
         state,
         node,
         started_at,
         f"Aggregated {components} material claim component(s) across "
-        f"{len(assessments)} claim(s); {adequate} adequately evidenced.",
+        f"{len(assessments)} claim(s); {adequate} adequately evidenced, "
+        f"{no_evidence} with no evidence at all.",
     )
 
 
@@ -552,6 +608,7 @@ def _assess(
 __all__ = [
     "SUFFICIENCY_DATASET_VERSION_KEY",
     "aggregate_claim_component_coverage",
+    "build_claim_component_inventory",
     "apply_sufficiency_policy",
     "build_evidence_weight_profiles",
     "build_independence_group_set",

@@ -51,8 +51,20 @@ RELEASE_BLOCKING_SUFFICIENCY_METRICS: tuple[str, ...] = (
     "incompatible_duplicate_assessment_rate",
     "sufficiency_mutated_trust_gate_rate",
     "sufficiency_mutated_project_score_rate",
+    # --- Phase 2E.1: claim-component completeness --------------------------
+    "unexamined_material_component_omitted_rate",
+    "incomplete_component_inventory_full_support_rate",
+    "incomplete_component_inventory_full_contradiction_rate",
+    "fabricated_component_anchor_acceptance_rate",
+    "invalid_component_inventory_acceptance_rate",
 )
-"""Every gate the specification requires, reported individually (section 32)."""
+"""Every gate the specification requires, reported individually (section 32).
+
+The last five are the Phase 2E.1 component-completeness gates. They are added
+to this tuple rather than folded into the existing ones: "a material claim
+component vanished from the denominator" is a different failure from "a
+duplicate source was counted twice", and a report that merged them would hide
+which one fired."""
 
 REQUIRED_PERFECT_METRICS: tuple[str, ...] = (
     "independence_grouping_accuracy",
@@ -65,6 +77,11 @@ REQUIRED_PERFECT_METRICS: tuple[str, ...] = (
     "unknown_state_preservation_accuracy",
     "assessment_traceability",
     "deterministic_rerun_accuracy",
+    # --- Phase 2E.1 ---------------------------------------------------------
+    "component_inventory_completeness_accuracy",
+    "unexamined_component_accuracy",
+    "component_origin_accuracy",
+    "inventory_partition_accuracy",
 )
 """Quality metrics that must be exactly 1.0, and actually measured, to release."""
 
@@ -97,6 +114,12 @@ class ClaimSufficiencyMetrics(MawhibaModel):
     scope_ceiling_accuracy: MetricCounts = Field(default_factory=MetricCounts)
     exact_claim_anchor_accuracy: MetricCounts = Field(default_factory=MetricCounts)
     policy_versioning_accuracy: MetricCounts = Field(default_factory=MetricCounts)
+    component_inventory_completeness_accuracy: MetricCounts = Field(
+        default_factory=MetricCounts
+    )
+    unexamined_component_accuracy: MetricCounts = Field(default_factory=MetricCounts)
+    component_origin_accuracy: MetricCounts = Field(default_factory=MetricCounts)
+    inventory_partition_accuracy: MetricCounts = Field(default_factory=MetricCounts)
 
     # --- release-blocking (target: zero) ------------------------------------
     project_state_mutation_rate: SafetyCounts = Field(default_factory=SafetyCounts)
@@ -173,6 +196,21 @@ class ClaimSufficiencyMetrics(MawhibaModel):
         default_factory=SafetyCounts
     )
     sufficiency_mutated_trust_gate_rate: SafetyCounts = Field(
+        default_factory=SafetyCounts
+    )
+    unexamined_material_component_omitted_rate: SafetyCounts = Field(
+        default_factory=SafetyCounts
+    )
+    incomplete_component_inventory_full_support_rate: SafetyCounts = Field(
+        default_factory=SafetyCounts
+    )
+    incomplete_component_inventory_full_contradiction_rate: SafetyCounts = Field(
+        default_factory=SafetyCounts
+    )
+    fabricated_component_anchor_acceptance_rate: SafetyCounts = Field(
+        default_factory=SafetyCounts
+    )
+    invalid_component_inventory_acceptance_rate: SafetyCounts = Field(
         default_factory=SafetyCounts
     )
     sufficiency_mutated_project_score_rate: SafetyCounts = Field(

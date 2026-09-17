@@ -9,6 +9,14 @@ There is no model provider parameter anywhere in this module, and that is the
 architectural decision, not an omission (section 16): every judgement Phase 2E
 makes follows from structured Phase 2D output plus trusted metadata, so adding
 an LLM would add a trust boundary with nothing behind it to decide.
+
+Phase 2E.1 added the claim-component inventory step. The material component set
+is now derived from each claim's own text and verified against it, so a material
+part of a compound claim that no Phase 2D alignment anchored stays in the
+sufficiency denominator instead of disappearing from it (ADR-016). That step is
+deterministic too, and deliberately so: see
+``src.research.sufficiency.inventory`` for why choosing cut points needs no
+model call and what granularity that costs.
 """
 
 from __future__ import annotations
@@ -21,6 +29,7 @@ from src.schemas.claim_alignment import (
     ClaimEvidenceAlignment,
     ClaimEvidenceAlignmentRun,
 )
+from src.schemas.claim_component_inventory import ClaimComponentInventory
 from src.schemas.claim_sufficiency import (
     ClaimComponentSufficiency,
     ClaimSufficiencyAssessment,
@@ -37,13 +46,15 @@ from src.schemas.claim_sufficiency import (
     assessment_id_for,
 )
 from src.research.sufficiency.identity import build_independence_groups
+from src.research.sufficiency.inventory import build_inventory
 from src.research.sufficiency.policy import (
     aggregate_limitations,
     aggregate_unknowns,
+    alignment_anchor_keys,
     component_sufficiency,
     content_scope_ceiling,
     decide_outcome,
-    material_component_keys,
+    material_components,
 )
 from src.research.sufficiency.profiles import build_weight_profile
 from src.schemas.academic import LogicalAcademicSource
@@ -104,6 +115,7 @@ def _audit_rationale(
     profiles: list[EvidenceWeightProfile],
     supporting: int,
     contradicting: int,
+    inventory: ClaimComponentInventory,
 ) -> str:
     """Template text assembled from the structured facts, never model prose."""
     adequate = sum(1 for c in components if c.is_adequately_evidenced)
@@ -117,10 +129,13 @@ def _audit_rationale(
             EvidenceContributionClass.DISQUALIFIED_UNTRACEABLE,
         )
     )
+    unexamined = len(inventory.unanchored_components)
     text = (
         f"{outcome.value} under SUFFICIENCY-POLICY-V1: "
+        f"component inventory {inventory.completeness.value}; "
         f"{adequate}/{len(components)} material component(s) adequately "
-        f"evidenced; {supporting} independent supporting group(s), "
+        f"evidenced, {unexamined} unexamined by any alignment anchor; "
+        f"{supporting} independent supporting group(s), "
         f"{contradicting} independent contradicting group(s); "
         f"{eligible} eligible and {disqualified} disqualified evidence item(s) "
         f"across {len(profiles)} aligned item(s). "
@@ -174,12 +189,19 @@ def assess_claim(
             )
         )
 
+    # The material component set is derived from the claim's own text, with the
+    # Phase 2D anchors only choosing where the partition is cut. That is the
+    # Phase 2E.1 fix: an unanchored material part of the claim is a component
+    # here, so it stays in the denominator instead of disappearing (ADR-016).
+    inventory = build_inventory(
+        claim, alignment_anchor_keys(profiles), claim_id=claim.claim_id
+    )
     components = [
-        component_sufficiency(claim.claim_id, key, profiles)
-        for key in material_component_keys(profiles)
+        component_sufficiency(claim.claim_id, component, profiles)
+        for component in material_components(inventory)
     ]
     outcome, blockers, reasons = decide_outcome(
-        components, profiles, universe_complete=universe_complete
+        components, profiles, inventory, universe_complete=universe_complete
     )
 
     supporting = sorted(
@@ -238,6 +260,7 @@ def assess_claim(
         sufficiency_run_id=sufficiency_run_id,
         claim_id=claim.claim_id,
         outcome=outcome,
+        component_inventory=inventory,
         components=components,
         profile_ids=[p.profile_id for p in profiles],
         independence_group_ids=all_groups,
@@ -252,7 +275,12 @@ def assess_claim(
         limitations=aggregate_limitations(profiles),
         content_scope_ceiling=content_scope_ceiling(profiles),
         audit_rationale=_audit_rationale(
-            outcome, components, profiles, len(supporting), len(contradicting)
+            outcome,
+            components,
+            profiles,
+            len(supporting),
+            len(contradicting),
+            inventory,
         ),
     )
     return assessment, profiles

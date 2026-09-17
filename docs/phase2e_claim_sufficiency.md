@@ -157,10 +157,48 @@ invisible, and "we looked at this and refused it" must read differently from
 
 ## 8. Claim-component coverage
 
-Material components are the distinct exact anchors Phase 2D produced for the
-claim, carried over verbatim — Phase 2D already proved
-`claim.claim[start:end] == anchor_text`, and re-deriving them here would be a
-second, weaker source of truth.
+### 8a. The material component set (Phase 2E.1, ADR-016)
+
+Material components come from the claim's **own text**, not from the union of
+the anchors Phase 2D happened to produce. `ClaimComponentInventory` is a
+verified *covering partition* of the claim: pairwise disjoint components, each
+with an exact anchor (`claim.claim[start:end] == text`, character for
+character), plus explicitly recorded `immaterial_spans`, such that every
+character of the claim belongs to exactly one of the two. `claim_text_hash`
+binds the inventory to the exact claim it describes.
+
+`COMPONENT-PARTITION-STRATEGY-V1` builds it:
+
+1. Verify every Phase 2D anchor against the claim text itself. An anchor that
+   fails is recorded as an issue and the inventory becomes `INCOMPLETE` — never
+   dropped quietly, because a fabricated anchor must make full sufficiency
+   impossible rather than merely shrink the denominator.
+2. Cut the claim at every surviving anchor boundary, plus `0` and `len(claim)`.
+3. A segment holding material content becomes a component; a segment of only
+   whitespace or punctuation becomes an `immaterial_span`.
+4. A component some anchor fully covers is `ALIGNMENT_ANCHORED`; otherwise it is
+   an `UNANCHORED_CLAIM_REMAINDER`. The label is audit information only — an
+   unanchored remainder counts in the denominator exactly like an anchored
+   component.
+5. `completeness` is arithmetic: `COMPLETE` only when there are no issues, at
+   least one material component exists, and the spans cover `[0, len(claim))`
+   exactly. `INCOMPLETE` and `UNKNOWN` each carry their own blocker, and
+   `UNKNOWN` is never read as `COMPLETE`.
+
+Materiality is whitespace and punctuation only. There is no stopword list, in
+any language: the rule can err only by calling filler *material*, which leaves
+an extra component in the denominator and makes sufficiency harder to reach.
+
+This is what closes the false-sufficiency path. For the claim
+`The detector reaches 94% accuracy, runs in 5 ms on embedded hardware.` with a
+single anchor at `The detector reaches 94% accuracy`, the anchor union was one
+supported component and the claim reached `SUFFICIENT_SUPPORT` with the latency
+half never examined. The partition gives two components, the second
+`NO_EVIDENCE`, and the claim is `PARTIALLY_SUFFICIENT` with the unexamined text
+named. See ADR-016, including what the partition does and does not prove.
+
+### 8b. Coverage per component
+
 
 A component is *adequately evidenced* only by **direct** coverage from eligible
 independence groups. A `SUPPORTS` component judgement inside a
@@ -243,7 +281,8 @@ START
   -> VALIDATE_SUFFICIENCY_INPUT          claims, evidence, sources present?
   -> BUILD_INDEPENDENCE_GROUPS           canonical identity; duplicate collapse
   -> BUILD_EVIDENCE_WEIGHT_PROFILES      multi-dimensional, no scalar
-  -> AGGREGATE_CLAIM_COMPONENT_COVERAGE  exact Phase 2D anchors
+  -> BUILD_CLAIM_COMPONENT_INVENTORY     complete material component set
+  -> AGGREGATE_CLAIM_COMPONENT_COVERAGE  every inventory component
   -> APPLY_SUFFICIENCY_POLICY            SUFFICIENCY-POLICY-V1
   -> FINALIZE_CLAIM_SUFFICIENCY          terminal status; the run stays open
   -> END
@@ -316,10 +355,22 @@ Run it with:
   complete scientific review of the paper. `content_scope_ceiling` and
   `ABSTRACT_ONLY_SCOPE` carry this on every record, and the ceiling is `None`
   when nothing contributed — never silently `FULL_TEXT`.
-- **The material component set comes from Phase 2D.** A claim component no
-  alignment ever anchored is invisible here. Enumerating components
-  independently would require semantic decomposition — a model call this phase
-  deliberately does not make.
+- **Verified exact component anchors are not a guaranteed-perfect semantic
+  decomposition.** Phase 2E.1 proves that each component is exact claim text,
+  that the components are disjoint, and that together they account for every
+  material character of the claim (ADR-016). It does not prove the partition
+  cuts the claim where a scientist would: a component may bundle two
+  propositions whenever no anchor fell between them, and the conjunction joining
+  two clauses is attached to one side rather than analysed. Completeness means
+  *no material claim text is unaccounted for*, not *the proposition has been
+  ideally decomposed*. Two adjacent unexamined stretches also merge into one
+  remainder, so `unexamined_component_count` is a lower bound on the number of
+  unexamined propositions — coarser, never smaller.
+- **`SUFFICIENT_SUPPORT` requires whole-proposition coverage.** Phase 2D's
+  anchors must collectively cover every material character of the claim. Where
+  they do not, the outcome is `PARTIALLY_SUFFICIENT` with the uncovered text
+  named. That is the conservative direction and the intended one, but it does
+  mean full sufficiency depends on Phase 2D anchor granularity.
 - **Policy-based, not proof.** `SUFFICIENT_SUPPORT` means this versioned
   policy's bar was met by the evidence currently available.
 - **Unknown metadata stays unknown.** Phase 2E resolves no missing retraction or

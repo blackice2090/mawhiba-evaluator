@@ -202,6 +202,12 @@ class GoldAlignment(MawhibaModel):
         description="Record a content hash that does not match the evidence, so "
         "the alignment was verified against different bytes.",
     )
+    fabricated_anchor: str | None = Field(
+        default=None,
+        description="Claim text that does not occur in the claim, recorded as a "
+        "component anchor at offset 0. Phase 2D could not produce this; Phase "
+        "2E.1 must refuse it rather than assume upstream verification held.",
+    )
 
     @model_validator(mode="after")
     def _known_relation(self) -> GoldAlignment:
@@ -239,6 +245,20 @@ class SufficiencyGoldExpectation(MawhibaModel):
     content_scope_ceiling: dict[str, str] = Field(default_factory=dict)
     duplicate_evidence_collapsed: int | None = Field(default=None, ge=0)
     assessments_total: int | None = Field(default=None, ge=0)
+    inventory_completeness: dict[str, str] = Field(
+        default_factory=dict,
+        description="claim_id -> ComponentInventoryCompleteness. UNKNOWN is "
+        "never interchangeable with COMPLETE (ADR-016).",
+    )
+    unexamined_components: dict[str, int] = Field(
+        default_factory=dict,
+        description="claim_id -> how many material claim components no "
+        "alignment anchor reached. Zero is an assertion, not a default.",
+    )
+    component_origins: dict[str, list[str]] = Field(
+        default_factory=dict,
+        description="claim_id -> ComponentOrigin values, in component order.",
+    )
 
 
 class SufficiencyGoldCase(MawhibaModel):
@@ -582,6 +602,23 @@ def build_alignments(case: SufficiencyGoldCase) -> list[ClaimEvidenceAlignment]:
         )
         text = claim_text[spec.claim_id]
         components = []
+        if spec.fabricated_anchor is not None:
+            # Deliberately not searched for in the claim: this anchor is
+            # invented claim text, recorded with a self-consistent span so the
+            # Phase 2D contract accepts it and Phase 2E.1 is the layer that has
+            # to catch it.
+            components.append(
+                ComponentAlignmentJudgment(
+                    anchor=ClaimComponentAnchor(
+                        claim_id=spec.claim_id,
+                        start=0,
+                        end=len(spec.fabricated_anchor),
+                        text=spec.fabricated_anchor,
+                    ),
+                    judgment=ComponentJudgment.SUPPORTS,
+                    reason_codes=[_REASON_FOR_JUDGMENT[ComponentJudgment.SUPPORTS]],
+                )
+            )
         for component in spec.components:
             start = text.index(component.text)
             judgment = ComponentJudgment(component.judgment)

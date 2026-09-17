@@ -11,7 +11,8 @@ Execution path::
       -> VALIDATE_SUFFICIENCY_INPUT          claims, evidence, sources present?
       -> BUILD_INDEPENDENCE_GROUPS           canonical identity; duplicate collapse
       -> BUILD_EVIDENCE_WEIGHT_PROFILES      multi-dimensional, no scalar score
-      -> AGGREGATE_CLAIM_COMPONENT_COVERAGE  exact Phase 2D anchors
+      -> BUILD_CLAIM_COMPONENT_INVENTORY     complete material component set
+      -> AGGREGATE_CLAIM_COMPONENT_COVERAGE  every inventory component
       -> APPLY_SUFFICIENCY_POLICY            SUFFICIENCY-POLICY-V1, deterministic
       -> FINALIZE_CLAIM_SUFFICIENCY          terminal status; the run stays open
       -> END
@@ -20,6 +21,12 @@ Execution path::
 node in the sequence: Phase 2E is deterministic by architecture (section 16).
 That is why graph construction here needs neither credentials nor a fake
 provider, and why an identical input produces an identical assessment.
+
+**Completeness before sufficiency.** ``BUILD_CLAIM_COMPONENT_INVENTORY`` runs
+before coverage is aggregated, so the denominator is settled from the claim's
+own text before any verdict is formed. A full-sufficiency outcome over an
+inventory that is not ``COMPLETE`` is refused by the assessment schema itself,
+not only by the policy node (ADR-016).
 
 **No later phase.** ``SCORING``, ``TRUST_GATE``, ``RED_TEAM``, ``NOVELTY`` and
 the rest are listed in ``FORBIDDEN_NODES`` so a test can assert their absence
@@ -43,6 +50,7 @@ from src.graph.registry import NodeId
 from src.graph.sufficiency_nodes import (
     aggregate_claim_component_coverage,
     apply_sufficiency_policy,
+    build_claim_component_inventory,
     build_evidence_weight_profiles,
     build_independence_group_set,
     finalize_claim_sufficiency,
@@ -58,6 +66,7 @@ PHASE_2E_NODE_SEQUENCE: tuple[NodeId, ...] = (
     NodeId.VALIDATE_SUFFICIENCY_INPUT,
     NodeId.BUILD_INDEPENDENCE_GROUPS,
     NodeId.BUILD_EVIDENCE_WEIGHT_PROFILES,
+    NodeId.BUILD_CLAIM_COMPONENT_INVENTORY,
     NodeId.AGGREGATE_CLAIM_COMPONENT_COVERAGE,
     NodeId.APPLY_SUFFICIENCY_POLICY,
     NodeId.FINALIZE_CLAIM_SUFFICIENCY,
@@ -84,6 +93,7 @@ _NODE_FUNCTIONS = {
     NodeId.VALIDATE_SUFFICIENCY_INPUT: validate_sufficiency_input,
     NodeId.BUILD_INDEPENDENCE_GROUPS: build_independence_group_set,
     NodeId.BUILD_EVIDENCE_WEIGHT_PROFILES: build_evidence_weight_profiles,
+    NodeId.BUILD_CLAIM_COMPONENT_INVENTORY: build_claim_component_inventory,
     NodeId.AGGREGATE_CLAIM_COMPONENT_COVERAGE: aggregate_claim_component_coverage,
     NodeId.APPLY_SUFFICIENCY_POLICY: apply_sufficiency_policy,
     NodeId.FINALIZE_CLAIM_SUFFICIENCY: finalize_claim_sufficiency,

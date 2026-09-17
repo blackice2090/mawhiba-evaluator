@@ -204,15 +204,17 @@ every judgement from the snapshot text independently of the verifier, and
 negative controls prove each gate can fire. Six quality metrics must be exactly
 1.0, and eleven release-blocking metrics must be zero.
 
-`evals/claim_sufficiency/v1/cases.jsonl` — 147 Gold cases, schema in
+`evals/claim_sufficiency/v1/cases.jsonl` — 175 Gold cases, schema in
 `evals/claim_sufficiency/v1/schema.md`. Each case describes a whole synthetic
 upstream world (claims, Phase 2B sources with identifiers, Phase 2C evidence,
 Phase 2D alignments) and is driven through the real Phase 2E graph. There is no
 scripted model output because Phase 2E makes no model call; the adversarial
 surface is the input *shape*. The scorer re-derives the independence partition
 from the fixture's own identifiers, independently of the code it grades. Ten
-quality metrics must be exactly 1.0 and thirty-three release-blocking metrics
-must be zero.
+quality metrics must be exactly 1.0 and thirty-eight release-blocking metrics
+must be zero. Phase 2E.1 added the last five (claim-component completeness) and
+four more required-perfect quality metrics; existing gates were preserved rather
+than merged.
 
 The approved baseline (`evals/intake/baselines/v1.json`) is never overwritten
 automatically — `write_baseline(..., approve=True)` or `--approve-baseline` is
@@ -253,13 +255,13 @@ not obvious from the code.
 - `docs/phase2b_academic_research_connectors.md` — academic connectors, identity resolution, merge policy, evals
 - `docs/phase2c_evidence_extraction.md` — content snapshots, verbatim verification, numeric fidelity, evidence evals
 - `docs/phase2d_claim_evidence_alignment.md` — relationship taxonomy, claim anchors, alignment evals
-- `docs/phase2e_claim_sufficiency.md` — independence grouping, evidence weight profiles, sufficiency policy, sufficiency evals
-- `docs/adr/ADR-0{01..15}-*.md` — decisions and their rejected alternatives
+- `docs/phase2e_claim_sufficiency.md` — independence grouping, evidence weight profiles, claim-component inventory, sufficiency policy, sufficiency evals
+- `docs/adr/ADR-0{01..16}-*.md` — decisions and their rejected alternatives
 
 ## Phase discipline
 
 Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A, 2A.1, 2B, 2B.1,
-2B.2, 2C, 2D, 2E). Phase 2A
+2B.2, 2C, 2D, 2E, 2E.1). Phase 2A
 added the research foundation: `ResearchRun` on graph state (never in
 `ProjectState`), verified query planning, and official Mawhiba requirements
 retrieval (`build_phase2a_research_graph()`). Research planning must never write
@@ -326,6 +328,32 @@ provider seam, no prompt version, documented as intentional in ADR-015. Only a
 `COMPLETED` Phase 2D run yields assessments; `PARTIAL` and
 `BLOCKED_PAIR_LIMIT_EXCEEDED` become `BLOCKED_ALIGNMENT_INCOMPLETE` rather than
 sufficiency over an alignment universe nobody examined.
+
+Phase 2E.1 closed a false-sufficiency path in that design (ADR-016). Phase 2E
+originally took the material component set to be the union of the anchors
+Phase 2D happened to produce, so a part of a compound claim nobody anchored was
+absent from the denominator: a claim could reach `SUFFICIENT_SUPPORT` on the
+anchored half while the other half was never examined. The material component
+set now comes from the claim's **own text**. `ClaimComponentInventory` is a
+verified covering partition of the claim — disjoint components at exact anchors
+(`claim.claim[start:end] == text`), plus recorded whitespace/punctuation spans,
+together accounting for every character — and `completeness` is arithmetic over
+the claim rather than a label a caller may assert. A part no alignment anchored
+is a first-class `UNANCHORED_CLAIM_REMAINDER` component with `NO_EVIDENCE`
+coverage, so unexamined claim content stays in the denominator and stays
+visible. `SUFFICIENT_SUPPORT` and `SUFFICIENT_CONTRADICTION` require
+`completeness == COMPLETE`, enforced by `ClaimSufficiencyAssessment`'s own
+validator and not only by policy code; the assessment's component set must also
+*equal* the inventory's, so a component cannot be dropped from a verdict.
+`UNKNOWN` completeness is never read as `COMPLETE`. Still **no model call**:
+`COMPONENT-PARTITION-STRATEGY-V1` cuts at boundaries Phase 2D already
+established and proves coverage of the claim separately, and it never splits on
+conjunctions or punctuation — "black and white image" is one component. What is
+proven is structural (exact anchors, disjointness, full coverage); a
+guaranteed-perfect semantic decomposition is **not** claimed, and ADR-016 states
+what that leaves. Every claim anchor is also re-sliced from the claim here, so a
+fabricated anchor makes its pair `CLAIM_ANCHOR_NOT_VERIFIABLE` and untraceable
+even when its span coincides with a real component.
 
 Novelty analysis, the scoring engine, Red Team, report generation, the patent
 / product / open-source / standards connectors, full-text acquisition, the

@@ -52,6 +52,11 @@ from pydantic import Field, model_validator
 
 from src.schemas.academic import AcademicSourceType
 from src.schemas.claim_alignment import CLAIM_ID_PATTERN, AlignmentRelation
+from src.schemas.claim_component_inventory import (
+    ClaimComponentInventory,
+    ComponentInventoryCompleteness,
+    ComponentOrigin,
+)
 from src.schemas.common import (
     CANONICAL_SOURCE_ID_PATTERN,
     MawhibaModel,
@@ -125,6 +130,7 @@ class TraceabilityStatus(StrEnum):
     ALIGNMENT_NOT_IN_RUN = "ALIGNMENT_NOT_IN_RUN"
     CLAIM_NOT_RESOLVABLE = "CLAIM_NOT_RESOLVABLE"
     EVIDENCE_HASH_MISMATCH = "EVIDENCE_HASH_MISMATCH"
+    CLAIM_ANCHOR_NOT_VERIFIABLE = "CLAIM_ANCHOR_NOT_VERIFIABLE"
 
 
 UNTRACEABLE_STATUSES: frozenset[TraceabilityStatus] = frozenset(
@@ -586,6 +592,10 @@ class SufficiencyReasonCode(StrEnum):
     UNKNOWN_RETRACTION_STATUS = "UNKNOWN_RETRACTION_STATUS"
     ALL_DIRECT_EVIDENCE_DISQUALIFIED = "ALL_DIRECT_EVIDENCE_DISQUALIFIED"
     INCOMPLETE_ALIGNMENT_UNIVERSE = "INCOMPLETE_ALIGNMENT_UNIVERSE"
+    COMPLETE_COMPONENT_INVENTORY = "COMPLETE_COMPONENT_INVENTORY"
+    INCOMPLETE_COMPONENT_INVENTORY = "INCOMPLETE_COMPONENT_INVENTORY"
+    UNKNOWN_COMPONENT_INVENTORY = "UNKNOWN_COMPONENT_INVENTORY"
+    UNEXAMINED_MATERIAL_COMPONENT = "UNEXAMINED_MATERIAL_COMPONENT"
 
 
 class SufficiencyBlocker(StrEnum):
@@ -599,20 +609,30 @@ class SufficiencyBlocker(StrEnum):
     ALL_DIRECT_EVIDENCE_UNTRACEABLE = "ALL_DIRECT_EVIDENCE_UNTRACEABLE"
     ALL_DIRECT_EVIDENCE_DISQUALIFIED = "ALL_DIRECT_EVIDENCE_DISQUALIFIED"
     INCOMPLETE_ALIGNMENT_UNIVERSE = "INCOMPLETE_ALIGNMENT_UNIVERSE"
+    INCOMPLETE_COMPONENT_INVENTORY = "INCOMPLETE_COMPONENT_INVENTORY"
+    UNKNOWN_COMPONENT_INVENTORY = "UNKNOWN_COMPONENT_INVENTORY"
 
 
 class ClaimComponentSufficiency(MawhibaModel):
     """Coverage of ONE material claim component, by independent group.
 
-    The anchor is the exact Phase 2D span (``claim.claim[start:end] ==
-    anchor_text``), carried unchanged. Support for one component is never read
-    as support for the compound claim (section 11).
+    The anchor is an exact span of the claim's own text
+    (``claim.claim[start:end] == anchor_text``), taken from the verified
+    ``ClaimComponentInventory``. Support for one component is never read as
+    support for the compound claim (section 11).
+
+    ``origin`` records whether any Phase 2D alignment anchor reached this
+    component. An ``UNANCHORED_CLAIM_REMAINDER`` is material claim content
+    nobody examined; it stays here with ``NO_EVIDENCE`` coverage and counts in
+    the denominator exactly like an anchored component, which is what closes the
+    Phase 2E.1 false-sufficiency path (ADR-016).
     """
 
     claim_id: str = Field(pattern=CLAIM_ID_PATTERN)
     anchor_start: int = Field(ge=0)
     anchor_end: int = Field(ge=1)
     anchor_text: str = Field(min_length=1)
+    origin: ComponentOrigin = ComponentOrigin.ALIGNMENT_ANCHORED
 
     coverage: ComponentCoverage
     corroboration: CorroborationLevel = CorroborationLevel.NONE
@@ -656,6 +676,16 @@ class ClaimComponentSufficiency(MawhibaModel):
             raise ValueError(
                 "corroboration level must match the number of independent "
                 "direct groups"
+            )
+        if self.origin is ComponentOrigin.UNANCHORED_CLAIM_REMAINDER and (
+            self.supporting_group_ids
+            or self.contradicting_group_ids
+            or self.partial_supporting_group_ids
+            or self.partial_contradicting_group_ids
+        ):
+            raise ValueError(
+                "an UNANCHORED_CLAIM_REMAINDER component cannot carry evidence "
+                "contributions; no alignment anchor reached it"
             )
         return self
 
@@ -712,6 +742,14 @@ class ClaimSufficiencyAssessment(MawhibaModel):
     claim_id: str = Field(pattern=CLAIM_ID_PATTERN)
 
     outcome: SufficiencyOutcome
+    component_inventory: ClaimComponentInventory = Field(
+        description="The complete material component set of the original claim, "
+        "derived from the claim's own text rather than from the union of "
+        "Phase 2D anchors (ADR-016). Its ``completeness`` is the machine-readable "
+        "answer to 'has the whole material proposition been accounted for?', and "
+        "a full-support or full-contradiction outcome is structurally invalid "
+        "unless it is COMPLETE."
+    )
     components: list[ClaimComponentSufficiency] = Field(default_factory=list)
     profile_ids: list[UUID] = Field(default_factory=list)
 
@@ -753,6 +791,33 @@ class ClaimSufficiencyAssessment(MawhibaModel):
         if len(set(keys)) != len(keys):
             raise ValueError("a component anchor appears twice in one assessment")
 
+        # The assessment is evaluated against the inventory, so the two must
+        # describe exactly the same component set. A component present in the
+        # inventory but absent here would be material claim content that
+        # disappeared from the denominator -- the Phase 2E.1 release blocker.
+        if self.component_inventory.claim_id != self.claim_id:
+            raise ValueError(
+                "component_inventory belongs to a different claim; cross-claim "
+                "inventory contamination is refused"
+            )
+        inventory_keys = set(self.component_inventory.component_keys)
+        if set(keys) != inventory_keys:
+            missing = sorted(inventory_keys - set(keys))
+            extra = sorted(set(keys) - inventory_keys)
+            raise ValueError(
+                "assessment components must match the claim component inventory "
+                f"exactly; missing={missing} unexpected={extra}"
+            )
+        origins = {
+            component.component_key: component.origin
+            for component in self.component_inventory.components
+        }
+        for component in self.components:
+            if origins[component.component_key] is not component.origin:
+                raise ValueError(
+                    "a component's origin disagrees with the inventory it came from"
+                )
+
         groups = set(self.independence_group_ids)
         for name in (
             "supporting_group_ids",
@@ -770,6 +835,16 @@ class ClaimSufficiencyAssessment(MawhibaModel):
                 )
 
         # An outcome must not outrun its component evidence.
+        if self.outcome in (
+            SufficiencyOutcome.SUFFICIENT_SUPPORT,
+            SufficiencyOutcome.SUFFICIENT_CONTRADICTION,
+        ) and not self.component_inventory.is_complete:
+            raise ValueError(
+                f"{self.outcome.value} requires a COMPLETE claim component "
+                f"inventory; completeness="
+                f"{self.component_inventory.completeness.value} means part of the "
+                "material proposition was never accounted for (ADR-016)"
+            )
         if self.outcome is SufficiencyOutcome.SUFFICIENT_SUPPORT:
             if not self.components or not all(
                 c.coverage is ComponentCoverage.SUPPORTED for c in self.components
@@ -830,6 +905,16 @@ class ClaimSufficiencyAssessment(MawhibaModel):
     @property
     def independence_group_count(self) -> int:
         return len(self.independence_group_ids)
+
+    @property
+    def inventory_completeness(self) -> ComponentInventoryCompleteness:
+        """The machine-readable completeness state, exposed on the assessment."""
+        return self.component_inventory.completeness
+
+    @property
+    def unexamined_component_count(self) -> int:
+        """Material claim components no Phase 2D alignment anchor reached."""
+        return len(self.component_inventory.unanchored_components)
 
     @property
     def is_abstract_only(self) -> bool:

@@ -2,7 +2,9 @@
 
 ## Status
 
-Accepted (Phase 2E).
+Accepted (Phase 2E). Amended by ADR-016 (Phase 2E.1), which replaces the
+Phase-2D-derived material component set with a component inventory derived from
+the claim's own text. Everything else here stands.
 
 ## Context
 
@@ -126,9 +128,12 @@ satisfies the component bar and the assessment carries
 `SINGLE_INDEPENDENT_SOURCE_ONLY`, so a later phase can weigh that explicitly and
 a report can state it.
 
-**Letting Phase 2E decompose claims into components itself.** Rejected as out
-of scope and as a hidden model call. The material component set is exactly what
-Phase 2D anchored. See the limitation below.
+**Letting Phase 2E decompose claims into components itself.** Rejected here as
+out of scope and as a hidden model call, on the reasoning that the material
+component set is exactly what Phase 2D anchored. **Revised by ADR-016**: the
+component set is now derived from the claim text, but still without a model
+call -- the inventory proves *coverage* of the claim arithmetically instead of
+proposing a semantic decomposition.
 
 ## Consequences
 
@@ -156,12 +161,16 @@ Limitations, stated rather than hidden:
   sufficiency assessment is evidence sufficiency *under currently available
   trusted content*, not a complete scientific review of the underlying paper.
   `content_scope_ceiling` and `ABSTRACT_ONLY_SCOPE` carry this on every record.
-- **The material component set comes from Phase 2D.** A claim component that no
-  alignment ever anchored is invisible to Phase 2E. A compound claim can
-  therefore reach `SUFFICIENT_SUPPORT` on the components Phase 2D identified,
-  while an unanchored component goes unexamined. Enumerating claim components
-  independently would require semantic decomposition — a model call this phase
-  deliberately does not make — so it is a later reviewed phase's job.
+- **The material component set came from Phase 2D. Superseded by ADR-016.**
+  This was originally recorded here as a limitation: a claim component no
+  alignment ever anchored was invisible to Phase 2E, so a compound claim could
+  reach `SUFFICIENT_SUPPORT` on the components Phase 2D identified while an
+  unanchored component went unexamined. On review that was a false-sufficiency
+  path rather than an acceptable limitation, and Phase 2E.1 closed it:
+  `ClaimComponentInventory` derives the material component set from the claim's
+  own text as a verified covering partition, an unanchored part is a first-class
+  `NO_EVIDENCE` component, and a full-sufficiency outcome requires a `COMPLETE`
+  inventory. See ADR-016, including what the partition does and does not prove.
 - **Sufficiency is policy-based, not proof.** `SUFFICIENT_SUPPORT` means this
   versioned policy's bar was met by the evidence currently available. It is not
   universal scientific proof, and it does not change a claim's status.

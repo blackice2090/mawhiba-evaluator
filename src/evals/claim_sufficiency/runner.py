@@ -20,6 +20,7 @@ watching for it.
 from __future__ import annotations
 
 import logging
+import unicodedata
 from dataclasses import dataclass, field
 from typing import Any
 from uuid import uuid4
@@ -469,11 +470,23 @@ def expected_contribution(
     item = by_evidence[alignment_spec.evidence]
     source = by_source[item.source]
 
+    claim_text = {c.claim_id: c.claim for c in case.claims}[alignment_spec.claim_id]
     untraceable = (
         alignment_spec.foreign_run
         or alignment_spec.hash_mismatch
         or item.missing_from_run
         or source.orphan
+        # A component anchor whose text the claim does not contain is invented
+        # claim text, so the pair cannot be audited (ADR-016). Re-derived from
+        # the fixture's own claim text, not from the pipeline's verdict.
+        or (
+            alignment_spec.fabricated_anchor is not None
+            and alignment_spec.fabricated_anchor not in claim_text
+        )
+        or any(
+            component.text not in claim_text
+            for component in alignment_spec.components
+        )
     )
     if untraceable:
         return EvidenceContributionClass.DISQUALIFIED_UNTRACEABLE
@@ -501,6 +514,74 @@ def expected_contribution(
         ),
         AlignmentRelation.NOT_RELEVANT: EvidenceContributionClass.NOT_RELEVANT,
     }[AlignmentRelation(alignment_spec.relation)]
+
+
+# ---------------------------------------------------------------------------
+# Phase 2E.1: the component inventory, re-derived independently
+# ---------------------------------------------------------------------------
+
+
+def expected_material_components(
+    claim_text: str, anchors: list[tuple[int, int]]
+) -> list[tuple[int, int]]:
+    """Re-derive the material component partition from the fixture's own text.
+
+    Independent of ``src.research.sufficiency.inventory``: this walks the claim
+    text directly, cuts at the anchor boundaries the *case* declares, trims and
+    drops spans that hold no material character, and returns the spans that
+    remain. A scorer that called the production builder would only prove the
+    builder agrees with itself.
+
+    The materiality test here is written separately too: a span is material
+    when it holds a character that is neither whitespace nor in Unicode's
+    punctuation or symbol categories.
+    """
+
+    def material(text: str) -> bool:
+        return any(
+            not ch.isspace() and unicodedata.category(ch)[0] not in ("P", "S")
+            for ch in text
+        )
+
+    cuts = {0, len(claim_text)}
+    for start, end in anchors:
+        if 0 <= start < end <= len(claim_text):
+            cuts.add(start)
+            cuts.add(end)
+    spans: list[tuple[int, int]] = []
+    ordered = sorted(cuts)
+    for start, end in zip(ordered, ordered[1:]):
+        segment = claim_text[start:end]
+        if not material(segment):
+            continue
+        lead = len(segment) - len(segment.lstrip())
+        trail = len(segment) - len(segment.rstrip())
+        spans.append((start + lead, end - trail))
+    return sorted(spans)
+
+
+def inventory_partitions_claim(claim_text: str, inventory: Any) -> bool:
+    """Whether the stored inventory really covers the whole claim, re-checked.
+
+    Re-computed from the stored offsets rather than trusted from
+    ``completeness``: an inventory that calls itself COMPLETE while leaving
+    claim characters unaccounted for is exactly the failure the
+    ``invalid_component_inventory_acceptance_rate`` gate exists to catch.
+    """
+    spans = [(c.start, c.end) for c in inventory.components] + [
+        (s.start, s.end) for s in inventory.immaterial_spans
+    ]
+    ordered = sorted(spans)
+    for (_, previous_end), (next_start, _) in zip(ordered, ordered[1:]):
+        if next_start < previous_end:
+            return False
+    covered = sum(end - start for start, end in ordered)
+    return (
+        bool(ordered)
+        and ordered[0][0] == 0
+        and covered == len(claim_text)
+        and inventory.claim_text_length == len(claim_text)
+    )
 
 
 def _anchor_is_real(claim_text: str, start: int, end: int, text: str) -> bool:
@@ -734,6 +815,133 @@ def score_sufficiency_case(  # noqa: C901 -- one metric per branch, read top to 
                     component.anchor_end,
                     component.anchor_text,
                 )
+            )
+
+        # -- Phase 2E.1: claim-component completeness ------------------------
+        inventory = assessment.component_inventory
+        for component in inventory.components:
+            metrics.exact_claim_anchor_accuracy.add(
+                claim is not None
+                and _anchor_is_real(
+                    claim.claim, component.start, component.end, component.text
+                )
+            )
+
+        # The material component set is re-derived from the fixture's own claim
+        # text and declared anchors, so "a material component vanished from the
+        # denominator" is caught by arithmetic the pipeline never performed.
+        declared_anchors = [
+            (c.anchor.start, c.anchor.end)
+            for a in outcome.alignments
+            if a.claim_id == assessment.claim_id
+            for c in a.components
+            if claim is not None
+            and _anchor_is_real(claim.claim, c.anchor.start, c.anchor.end, c.anchor.text)
+        ]
+        omitted = True
+        partition_holds = False
+        if claim is not None:
+            recomputed = expected_material_components(claim.claim, declared_anchors)
+            present = sorted((c.anchor_start, c.anchor_end) for c in assessment.components)
+            omitted = recomputed != present
+            partition_holds = inventory_partitions_claim(claim.claim, inventory)
+            # COMPLETE implies the partition really covers the claim. The
+            # converse does not hold: an inventory built over a fabricated
+            # anchor can still partition the claim and is still INCOMPLETE.
+            metrics.inventory_partition_accuracy.add(
+                partition_holds or not inventory.is_complete
+            )
+            for component in assessment.components:
+                anchored = any(
+                    anchor_start <= component.anchor_start
+                    and component.anchor_end <= anchor_end
+                    for anchor_start, anchor_end in declared_anchors
+                )
+                metrics.component_origin_accuracy.add(
+                    (component.origin.value == "ALIGNMENT_ANCHORED") == anchored
+                )
+        metrics.unexamined_material_component_omitted_rate.record(omitted)
+
+        # A full-sufficiency outcome over an inventory that is not COMPLETE is
+        # the false-sufficiency path itself. Both directions get their own gate.
+        metrics.incomplete_component_inventory_full_support_rate.record(
+            assessment.outcome is SufficiencyOutcome.SUFFICIENT_SUPPORT
+            and not inventory.is_complete
+        )
+        metrics.incomplete_component_inventory_full_contradiction_rate.record(
+            assessment.outcome is SufficiencyOutcome.SUFFICIENT_CONTRADICTION
+            and not inventory.is_complete
+        )
+
+        # An inventory component whose text is not the claim's own text is
+        # fabricated claim content. It must never be accepted, and a fabricated
+        # Phase 2D anchor must never leave the inventory COMPLETE.
+        fabricated = claim is not None and any(
+            not _anchor_is_real(
+                claim.claim, component.start, component.end, component.text
+            )
+            for component in inventory.components
+        )
+        fabricated_anchor_declared = claim is not None and any(
+            not _anchor_is_real(
+                claim.claim, c.anchor.start, c.anchor.end, c.anchor.text
+            )
+            for a in outcome.alignments
+            if a.claim_id == assessment.claim_id
+            for c in a.components
+        )
+        # Three distinct ways a fabricated anchor could be accepted: it could
+        # become an inventory component, it could leave the inventory COMPLETE,
+        # or -- subtlest -- its span could coincide with a real component and
+        # vouch for it. The last is why eligibility is checked too.
+        fabricated_contributed = fabricated_anchor_declared and any(
+            profile.is_eligible
+            for profile in run.weight_profiles
+            if profile.claim_id == assessment.claim_id
+            and any(
+                claim is not None
+                and not _anchor_is_real(
+                    claim.claim,
+                    contribution.anchor_start,
+                    contribution.anchor_end,
+                    contribution.anchor_text,
+                )
+                for contribution in profile.component_contributions
+            )
+        )
+        metrics.fabricated_component_anchor_acceptance_rate.record(
+            fabricated
+            or (fabricated_anchor_declared and inventory.is_complete)
+            or fabricated_contributed
+        )
+
+        # An inventory that reports COMPLETE must survive an independent
+        # re-derivation of its own partition, and must name this claim.
+        metrics.invalid_component_inventory_acceptance_rate.record(
+            inventory.is_complete
+            and (
+                not partition_holds
+                or inventory.claim_id != assessment.claim_id
+                or bool(inventory.issues)
+            )
+        )
+
+        expected_completeness = expected.inventory_completeness.get(
+            assessment.claim_id
+        )
+        if expected_completeness is not None:
+            metrics.component_inventory_completeness_accuracy.add(
+                inventory.completeness.value == expected_completeness
+            )
+        expected_unexamined = expected.unexamined_components.get(assessment.claim_id)
+        if expected_unexamined is not None:
+            metrics.unexamined_component_accuracy.add(
+                assessment.unexamined_component_count == expected_unexamined
+            )
+        expected_origins = expected.component_origins.get(assessment.claim_id)
+        if expected_origins is not None:
+            metrics.component_origin_accuracy.add(
+                [c.origin.value for c in assessment.components] == expected_origins
             )
 
         expected_outcome = expected.outcomes.get(assessment.claim_id)

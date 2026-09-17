@@ -29,9 +29,20 @@ than the alternative of refusing single-source sufficiency and thereby making
 every honest single-study finding indistinguishable from no finding at all.
 A later scoring phase can weigh that reason code; this phase must not hide it.
 
-**Per claim.** Material components are the distinct exact anchors Phase 2D
-produced for that claim. A claim with no anchors at all has no component to
-cover, which is why it can never reach ``SUFFICIENT_SUPPORT``.
+**Per claim.** Material components are the components of the verified
+``ClaimComponentInventory`` -- the complete covering partition of the *original
+claim's own text* (``COMPONENT-PARTITION-STRATEGY-V1``, ADR-016). They are
+deliberately **not** the union of the exact anchors Phase 2D happened to
+produce: a material part of the claim that no alignment ever anchored is present
+in the inventory as an ``UNANCHORED_CLAIM_REMAINDER`` component, arrives here
+with ``NO_EVIDENCE`` coverage, and counts in the denominator exactly like an
+anchored component. A claim with no anchors at all therefore has exactly one
+component -- the whole claim, unexamined -- rather than none.
+
+A full-sufficiency outcome requires the inventory to be ``COMPLETE``.
+``INCOMPLETE`` and ``UNKNOWN`` completeness each carry their own blocker and
+downgrade ``SUFFICIENT_SUPPORT``/``SUFFICIENT_CONTRADICTION`` to
+``PARTIALLY_SUFFICIENT``. Unknown completeness is never read as complete.
 
 1. ``BLOCKED_SOURCE_QUALITY``  -- direct alignments exist, but every one of them
    was disqualified.
@@ -78,6 +89,11 @@ from src.schemas.claim_sufficiency import (
     TraceabilityStatus,
 )
 from src.schemas.claim_sufficiency import DIRECT_RELATIONS
+from src.schemas.claim_component_inventory import (
+    ClaimComponentInventory,
+    ComponentInventoryCompleteness,
+    InventoryComponent,
+)
 
 SCOPE_STRENGTH: dict[ContentScopeLimitation, int] = {
     ContentScopeLimitation.ABSTRACT_ONLY: 0,
@@ -98,17 +114,28 @@ def _sorted_unique(values: list[UUID]) -> list[UUID]:
 
 def component_sufficiency(
     claim_id: str,
-    component_key: tuple[int, int, str],
+    component: InventoryComponent,
     profiles: list[EvidenceWeightProfile],
 ) -> ClaimComponentSufficiency:
-    """Aggregate every profile touching one exact component anchor.
+    """Aggregate every profile whose anchor covers one inventory component.
+
+    The component comes from the verified ``ClaimComponentInventory``, not from
+    the Phase 2D anchor set, so a material part of the claim no alignment ever
+    reached arrives here too -- and leaves as ``NO_EVIDENCE`` rather than not
+    arriving at all (ADR-016).
+
+    A Phase 2D contribution counts for this component only when its anchor
+    *fully covers* the component span. Partial overlap never counts: the
+    inventory was cut at anchor boundaries precisely so that each anchor either
+    covers a component entirely or does not touch it, and accepting a partial
+    overlap would let evidence aimed at one phrase vouch for the next one.
 
     Group ids, not profile counts, are collected on every axis. Two excerpts
     from one paper land in the same group id and therefore collapse to one
     entry, which is where ``More excerpts != More independent sources`` becomes
     arithmetic rather than aspiration.
     """
-    start, end, text = component_key
+    start, end, text = component.component_key
     supporting: list[UUID] = []
     contradicting: list[UUID] = []
     partial_supporting: list[UUID] = []
@@ -120,7 +147,11 @@ def component_sufficiency(
 
     for profile in profiles:
         contribution = next(
-            (c for c in profile.component_contributions if c.component_key == component_key),
+            (
+                c
+                for c in profile.component_contributions
+                if c.anchor_start <= start and end <= c.anchor_end
+            ),
             None,
         )
         if contribution is None:
@@ -225,6 +256,7 @@ def component_sufficiency(
         anchor_start=start,
         anchor_end=end,
         anchor_text=text,
+        origin=component.origin,
         coverage=coverage,
         corroboration=corroboration,
         supporting_group_ids=supporting,
@@ -238,15 +270,27 @@ def component_sufficiency(
     )
 
 
-def material_component_keys(
+def material_components(
+    inventory: ClaimComponentInventory,
+) -> list[InventoryComponent]:
+    """The claim's material components, in stable span order.
+
+    Taken from the verified inventory rather than from the Phase 2D anchor
+    union. That substitution *is* the Phase 2E.1 fix: the denominator is now
+    derived from the claim's own text, so a component no alignment anchored
+    cannot vanish from it.
+    """
+    return sorted(inventory.components, key=lambda component: component.span)
+
+
+def alignment_anchor_keys(
     profiles: list[EvidenceWeightProfile],
 ) -> list[tuple[int, int, str]]:
     """The distinct exact claim-component anchors Phase 2D identified.
 
-    Sorted by span so the component order of an assessment is stable across
-    reruns. Anchors are taken verbatim from Phase 2D, never re-derived: they
-    were already proven to satisfy ``claim.claim[start:end] == anchor_text``
-    there, and re-deriving them here would be a second, weaker source of truth.
+    Retained as audit information and as the input to the inventory's cut
+    points. It is deliberately **not** the material component set any more: on
+    its own it is exactly the blind spot ADR-016 closes.
     """
     keys = {
         contribution.component_key
@@ -294,15 +338,47 @@ def duplicate_collapse_occurred(profiles: list[EvidenceWeightProfile]) -> bool:
     return len(items) > len(groups)
 
 
+def inventory_posture(
+    inventory: ClaimComponentInventory,
+) -> tuple[list[SufficiencyBlocker], list[SufficiencyReasonCode]]:
+    """What the claim-component inventory contributes to the verdict.
+
+    Completeness is reported before anything else is decided, because it
+    governs whether a full-sufficiency outcome is available at all. ``UNKNOWN``
+    gets its own blocker rather than borrowing ``INCOMPLETE``'s: "the claim
+    could not be read" and "the claim was read and part of it is unaccounted
+    for" are different facts about a project.
+    """
+    blockers: list[SufficiencyBlocker] = []
+    reasons: list[SufficiencyReasonCode] = []
+    if inventory.completeness is ComponentInventoryCompleteness.COMPLETE:
+        reasons.append(SufficiencyReasonCode.COMPLETE_COMPONENT_INVENTORY)
+    elif inventory.completeness is ComponentInventoryCompleteness.UNKNOWN:
+        blockers.append(SufficiencyBlocker.UNKNOWN_COMPONENT_INVENTORY)
+        reasons.append(SufficiencyReasonCode.UNKNOWN_COMPONENT_INVENTORY)
+    else:
+        blockers.append(SufficiencyBlocker.INCOMPLETE_COMPONENT_INVENTORY)
+        reasons.append(SufficiencyReasonCode.INCOMPLETE_COMPONENT_INVENTORY)
+    if inventory.unanchored_components:
+        reasons.append(SufficiencyReasonCode.UNEXAMINED_MATERIAL_COMPONENT)
+    return blockers, reasons
+
+
 def decide_outcome(
     components: list[ClaimComponentSufficiency],
     profiles: list[EvidenceWeightProfile],
+    inventory: ClaimComponentInventory,
     *,
     universe_complete: bool = True,
 ) -> tuple[SufficiencyOutcome, list[SufficiencyBlocker], list[SufficiencyReasonCode]]:
-    """Apply ``SUFFICIENCY-POLICY-V1`` to one claim's aggregated coverage."""
-    blockers: list[SufficiencyBlocker] = []
-    reasons: list[SufficiencyReasonCode] = []
+    """Apply ``SUFFICIENCY-POLICY-V1`` to one claim's aggregated coverage.
+
+    ``inventory`` is the complete material component set of the original claim.
+    A full-sufficiency outcome requires it to be ``COMPLETE``; that is enforced
+    again in ``ClaimSufficiencyAssessment``'s own validator, so the guarantee
+    does not depend on this function being the only caller (ADR-016).
+    """
+    blockers, reasons = inventory_posture(inventory)
 
     direct_profiles = [p for p in profiles if p.relation in DIRECT_RELATIONS]
     direct_eligible = [
@@ -369,18 +445,23 @@ def decide_outcome(
     if contested or (supported and contradicted):
         return SufficiencyOutcome.CONTESTED, blockers, reasons
 
+    # A full-sufficiency outcome needs two independent things to hold: the
+    # alignment universe must be complete (Phase 2D examined every required
+    # pair) *and* the component inventory must be complete (the whole material
+    # proposition is accounted for). Either gap downgrades rather than promotes.
+    full_outcome_available = universe_complete and inventory.is_complete
     if components and len(supported) == len(components):
         outcome = (
-            SufficiencyOutcome.PARTIALLY_SUFFICIENT
-            if not universe_complete
-            else SufficiencyOutcome.SUFFICIENT_SUPPORT
+            SufficiencyOutcome.SUFFICIENT_SUPPORT
+            if full_outcome_available
+            else SufficiencyOutcome.PARTIALLY_SUFFICIENT
         )
         return outcome, blockers, reasons
     if components and len(contradicted) == len(components):
         outcome = (
-            SufficiencyOutcome.PARTIALLY_SUFFICIENT
-            if not universe_complete
-            else SufficiencyOutcome.SUFFICIENT_CONTRADICTION
+            SufficiencyOutcome.SUFFICIENT_CONTRADICTION
+            if full_outcome_available
+            else SufficiencyOutcome.PARTIALLY_SUFFICIENT
         )
         return outcome, blockers, reasons
     if adequate:
@@ -449,5 +530,7 @@ __all__ = [
     "content_scope_ceiling",
     "decide_outcome",
     "duplicate_collapse_occurred",
-    "material_component_keys",
+    "inventory_posture",
+    "alignment_anchor_keys",
+    "material_components",
 ]

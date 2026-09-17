@@ -72,6 +72,21 @@ def resolve_traceability(
         return TraceabilityStatus.EVIDENCE_HASH_MISMATCH
     if group is None:
         return TraceabilityStatus.SOURCE_NOT_RESOLVABLE
+    # Every claim anchor is re-sliced from the claim itself. Phase 2D proved
+    # this already, and Phase 2E.1 proves it again rather than assuming the
+    # upstream verification held: an anchor carrying text the claim does not
+    # contain is invented claim text, and a judgement made at an anchor that
+    # does not exist cannot be audited. Re-checking also stops a fabricated
+    # anchor whose *span* happens to coincide with a real component from
+    # vouching for that component (ADR-016).
+    for component in alignment.components:
+        anchor = component.anchor
+        if anchor.claim_id != claim.claim_id:
+            return TraceabilityStatus.CLAIM_ANCHOR_NOT_VERIFIABLE
+        if anchor.end > len(claim.claim) or (
+            claim.claim[anchor.start : anchor.end] != anchor.text
+        ):
+            return TraceabilityStatus.CLAIM_ANCHOR_NOT_VERIFIABLE
     return TraceabilityStatus.TRACEABLE
 
 
