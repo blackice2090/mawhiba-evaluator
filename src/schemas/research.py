@@ -19,6 +19,7 @@ from pydantic import ConfigDict, Field, model_validator
 
 from src.schemas.academic import AcademicRetrievalResult
 from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
+from src.schemas.claim_evidence_score import ClaimEvidenceScoringRun
 from src.schemas.claim_sufficiency import ClaimSufficiencyRun
 from src.schemas.evidence_extraction import EvidenceExtractionRun
 from src.schemas.common import (
@@ -360,6 +361,14 @@ class ResearchRun(MawhibaModel):
         "alignments: it is an auditable analytical artifact over them, and it "
         "mutates no claim, no score and no trust verdict (ADR-010, ADR-015).",
     )
+    claim_evidence_scoring: ClaimEvidenceScoringRun | None = Field(
+        default=None,
+        description="Phase 2F deterministic claim-evidence scoring over the "
+        "Phase 2E assessments. On the run for the same ownership reason as "
+        "every phase since 2B, and emphatically not ProjectState.scores: an "
+        "evidence index is an auditable analytical artifact, not a project "
+        "rubric score and not an official judging score (ADR-010, ADR-017).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -406,6 +415,23 @@ class ResearchRun(MawhibaModel):
             and self.claim_sufficiency.research_run_id != self.research_run_id
         ):
             raise ValueError("claim_sufficiency belongs to a different research run")
+        if (
+            self.claim_evidence_scoring is not None
+            and self.claim_evidence_scoring.research_run_id != self.research_run_id
+        ):
+            raise ValueError(
+                "claim_evidence_scoring belongs to a different research run"
+            )
+        if self.claim_evidence_scoring is not None and self.claim_sufficiency is not None:
+            scoring_source = self.claim_evidence_scoring.sufficiency_run_id
+            if (
+                scoring_source is not None
+                and scoring_source != self.claim_sufficiency.sufficiency_run_id
+            ):
+                raise ValueError(
+                    "claim_evidence_scoring was scored from a different "
+                    "sufficiency run than this research run carries"
+                )
         return self
 
     @property
