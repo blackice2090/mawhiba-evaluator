@@ -188,6 +188,40 @@ class ClaimSufficiencySettings(MawhibaModel):
     )
 
 
+class PatentResearchSettings(MawhibaModel):
+    """Phase 2G patent search budget (section 26).
+
+    Every limit is recorded on the run's ``PatentBudgetReport`` beside the count
+    it cut off, so reaching one is never silent and never reported as complete
+    coverage. Small by default: EPO OPS is a fair-use limited service, and Phase
+    2G aims at well-provenanced candidates rather than volume (section 27).
+    """
+
+    max_queries_per_claim: int = Field(default=4, ge=1, le=16)
+    max_queries_per_run: int = Field(default=12, ge=1, le=100)
+    max_results_per_query: int = Field(default=10, ge=1, le=100)
+    max_pages_per_query: int = Field(
+        default=1,
+        ge=1,
+        le=5,
+        description="OPS Range windows requested per query. One window by "
+        "default; a provider-reported total above it is recorded, not chased.",
+    )
+    max_total_provider_results: int = Field(default=100, ge=1, le=2000)
+    max_verified_publications: int = Field(default=50, ge=1, le=1000)
+    max_family_lookups: int = Field(default=25, ge=0, le=500)
+    max_classification_expansions: int = Field(default=0, ge=0, le=10)
+    retry_limit: int = Field(default=3, ge=1, le=5)
+    timeout_seconds: float = Field(default=30.0, gt=0.0, le=120.0)
+    base_backoff_seconds: float = Field(default=0.5, ge=0.0, le=30.0)
+    fetch_description: bool = Field(
+        default=False,
+        description="Also fetch the full description. Off by default: it is "
+        "large, costly against a fair-use limit, and only useful once a later "
+        "phase has narrowed the candidates. Absence is recorded as NOT_REQUESTED.",
+    )
+
+
 class ResearchSettings(MawhibaModel):
     limits: QueryPlanLimits = Field(default_factory=QueryPlanLimits)
     official: OfficialRequirementsSettings = Field(default_factory=OfficialRequirementsSettings)
@@ -199,6 +233,7 @@ class ResearchSettings(MawhibaModel):
     sufficiency: ClaimSufficiencySettings = Field(
         default_factory=ClaimSufficiencySettings
     )
+    patent: PatentResearchSettings = Field(default_factory=PatentResearchSettings)
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()
