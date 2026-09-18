@@ -597,6 +597,26 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "ScoringGoldCase",
         "ScoringGoldDataset",
         "ScoringGoldExpectation",
+        # Phase 2G patent prior-art research. Every production contract is
+        # checkpoint-reachable from ResearchRun.patent_prior_art and registers
+        # automatically. Excluded here:
+        # - the untrusted model-facing expansion DTOs, which the planner
+        #   re-validates term by term and never stores (the Phase 1B rule);
+        # - the provider-response base class, which is transport input and is
+        #   never canonical state;
+        # - the per-process patent search budget settings, whose effective
+        #   values ARE checkpointed on PatentPriorArtRun.budget;
+        # - the offline Gold eval layer, which runs outside the graph.
+        "CandidatePatentExpansion",
+        "CandidatePatentTerm",
+        "PatentFacingModel",
+        "PatentResearchSettings",
+        "GoldExpected",
+        "GoldFamily",
+        "GoldRecord",
+        "GoldSearch",
+        "GoldText",
+        "PatentGoldCase",
     }
 )
 """Types that legitimately never cross the checkpoint boundary.

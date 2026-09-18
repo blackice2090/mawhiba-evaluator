@@ -95,6 +95,17 @@ ARABIC_AS_DATA: dict[Path, str] = {
     / "scripts"
     / "generate_phase2f_gold.py": "one-off generator embedding the Arabic and "
                                   "mixed-language Gold claim/excerpt literals it writes out",
+    PROJECT_ROOT
+    / "scripts"
+    / "generate_phase2g_gold.py": "one-off generator embedding the Arabic and "
+                                  "mixed-language Gold claim, injection and patent "
+                                  "abstract literals it writes out",
+    PROJECT_ROOT
+    / "evals"
+    / "patent_prior_art"
+    / "v1"
+    / "cases.jsonl": "synthetic Arabic and mixed-language claims, injection "
+                     "attempts and patent abstracts",
 }
 
 FILES_ALLOWED_TO_QUOTE_ARABIC = set(ARABIC_AS_DATA)

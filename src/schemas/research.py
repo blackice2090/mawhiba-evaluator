@@ -21,6 +21,7 @@ from src.schemas.academic import AcademicRetrievalResult
 from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
 from src.schemas.claim_evidence_score import ClaimEvidenceScoringRun
 from src.schemas.claim_sufficiency import ClaimSufficiencyRun
+from src.schemas.patent import PatentPriorArtRun
 from src.schemas.evidence_extraction import EvidenceExtractionRun
 from src.schemas.common import (
     MawhibaModel,
@@ -369,6 +370,14 @@ class ResearchRun(MawhibaModel):
         "evidence index is an auditable analytical artifact, not a project "
         "rubric score and not an official judging score (ADR-010, ADR-017).",
     )
+    patent_prior_art: PatentPriorArtRun | None = Field(
+        default=None,
+        description="Phase 2G PATENT branch: bounded, provenance-recorded patent "
+        "search candidates for a later comparison phase. On the run for the same "
+        "ownership reason as every phase since 2B; never evidence, never a "
+        "novelty verdict and never a legal prior-art conclusion (ADR-010, "
+        "ADR-018).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -432,6 +441,11 @@ class ResearchRun(MawhibaModel):
                     "claim_evidence_scoring was scored from a different "
                     "sufficiency run than this research run carries"
                 )
+        if (
+            self.patent_prior_art is not None
+            and self.patent_prior_art.research_run_id != self.research_run_id
+        ):
+            raise ValueError("patent_prior_art belongs to a different research run")
         return self
 
     @property
