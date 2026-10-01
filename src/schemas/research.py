@@ -21,7 +21,9 @@ from src.schemas.academic import AcademicRetrievalResult
 from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
 from src.schemas.claim_evidence_score import ClaimEvidenceScoringRun
 from src.schemas.claim_sufficiency import ClaimSufficiencyRun
+from src.schemas.open_source_prior_art import OpenSourcePriorArtRun
 from src.schemas.patent import PatentPriorArtRun
+from src.schemas.product_prior_art import ProductPriorArtRun
 from src.schemas.evidence_extraction import EvidenceExtractionRun
 from src.schemas.common import (
     MawhibaModel,
@@ -378,6 +380,20 @@ class ResearchRun(MawhibaModel):
         "novelty verdict and never a legal prior-art conclusion (ADR-010, "
         "ADR-018).",
     )
+    product_prior_art: ProductPriorArtRun | None = Field(
+        default=None,
+        description="Phase 2H PRODUCT track: bounded web discovery, safely fetched "
+        "artifacts and identity-justified product entities, ending at candidates "
+        "for a later comparison phase. Never evidence, never a novelty verdict "
+        "and never a legal conclusion (ADR-019).",
+    )
+    open_source_prior_art: OpenSourcePriorArtRun | None = Field(
+        default=None,
+        description="Phase 2H OPEN_SOURCE track: bounded repository and code "
+        "discovery, repositories verified by stable id, bounded snapshots and "
+        "provider-declared networks, ending at candidates. Never a copying, "
+        "novelty or legal conclusion (ADR-019).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -446,6 +462,12 @@ class ResearchRun(MawhibaModel):
             and self.patent_prior_art.research_run_id != self.research_run_id
         ):
             raise ValueError("patent_prior_art belongs to a different research run")
+        for label, subrun in (
+            ("product_prior_art", self.product_prior_art),
+            ("open_source_prior_art", self.open_source_prior_art),
+        ):
+            if subrun is not None and subrun.research_run_id != self.research_run_id:
+                raise ValueError(f"{label} belongs to a different research run")
         return self
 
     @property
