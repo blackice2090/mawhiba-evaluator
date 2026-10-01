@@ -617,6 +617,30 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "GoldSearch",
         "GoldText",
         "PatentGoldCase",
+        # Phase 2H product and open-source prior-art research. Every production
+        # contract is checkpoint-reachable from ResearchRun.product_prior_art and
+        # ResearchRun.open_source_prior_art and registers automatically.
+        # Excluded here:
+        # - the untrusted model-facing expansion DTOs, re-validated term by term
+        #   and never stored (the Phase 1B rule);
+        # - the per-process budget settings, whose effective values ARE
+        #   checkpointed on each subrun's DiscoveryBudget;
+        # - the safe fetcher's URL-refusal reason and the reviewed host
+        #   registry's page-kind enum, which are fetcher/configuration
+        #   vocabulary: the run stores the resulting fetch status and source role;
+        # - the offline Gold eval layer, which runs outside the graph.
+        "CandidateDiscoveryExpansion",
+        "CandidateDiscoveryTerm",
+        "ProductResearchSettings",
+        "OpenSourceResearchSettings",
+        "UrlRefusal",
+        "VendorPageKind",
+        "GoldOss",
+        "GoldPage",
+        "GoldProduct",
+        "GoldVendor",
+        "ProductOssGoldCase",
+        "_Strict",
     }
 )
 """Types that legitimately never cross the checkpoint boundary.

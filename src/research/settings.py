@@ -222,6 +222,49 @@ class PatentResearchSettings(MawhibaModel):
     )
 
 
+class ProductResearchSettings(MawhibaModel):
+    """Phase 2H product-track budget (section 34). Small by default."""
+
+    max_queries_per_claim: int = Field(default=4, ge=1, le=16)
+    max_queries_per_run: int = Field(default=12, ge=1, le=100)
+    max_results_per_query: int = Field(default=10, ge=1, le=20)
+    max_pages_per_query: int = Field(default=1, ge=1, le=10)
+    max_total_observations: int = Field(default=80, ge=1, le=1000)
+    max_product_fetches: int = Field(default=20, ge=0, le=200)
+    max_artifact_bytes: int = Field(default=2_000_000, ge=10_000, le=10_000_000)
+    max_redirects: int = Field(default=3, ge=0, le=10)
+    retry_limit: int = Field(default=3, ge=1, le=5)
+    timeout_seconds: float = Field(default=15.0, gt=0.0, le=60.0)
+
+
+class OpenSourceResearchSettings(MawhibaModel):
+    """Phase 2H open-source budget (section 34). GitHub search is rate-limited."""
+
+    max_queries_per_claim: int = Field(default=4, ge=1, le=16)
+    max_queries_per_run: int = Field(default=12, ge=1, le=100)
+    max_results_per_query: int = Field(default=10, ge=1, le=100)
+    max_pages_per_query: int = Field(default=1, ge=1, le=10)
+    max_total_observations: int = Field(default=100, ge=1, le=1000)
+    max_repository_lookups: int = Field(default=25, ge=0, le=500)
+    max_code_hits_per_repository: int = Field(default=5, ge=1, le=100)
+    max_content_bytes: int = Field(default=200_000, ge=1_000, le=1_000_000)
+    max_network_lookups: int = Field(default=10, ge=0, le=200)
+    fetch_releases: bool = True
+    fetch_head_commit: bool = True
+    manifest_paths: tuple[str, ...] = (
+        "package.json",
+        "pyproject.toml",
+        "requirements.txt",
+        "setup.py",
+        "Cargo.toml",
+        "pom.xml",
+        "go.mod",
+    )
+    max_manifests_per_repository: int = Field(default=2, ge=0, le=10)
+    retry_limit: int = Field(default=3, ge=1, le=5)
+    timeout_seconds: float = Field(default=20.0, gt=0.0, le=60.0)
+
+
 class ResearchSettings(MawhibaModel):
     limits: QueryPlanLimits = Field(default_factory=QueryPlanLimits)
     official: OfficialRequirementsSettings = Field(default_factory=OfficialRequirementsSettings)
@@ -234,6 +277,8 @@ class ResearchSettings(MawhibaModel):
         default_factory=ClaimSufficiencySettings
     )
     patent: PatentResearchSettings = Field(default_factory=PatentResearchSettings)
+    product: ProductResearchSettings = Field(default_factory=ProductResearchSettings)
+    open_source: OpenSourceResearchSettings = Field(default_factory=OpenSourceResearchSettings)
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()
