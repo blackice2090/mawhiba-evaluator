@@ -426,9 +426,13 @@ def _product_gates(result: CaseResult, p: ProductPriorArtRun, world: CaseWorld) 
         all_keys = {k for a in members for k in keys(a)}
         collapsed += any(len({k for k in all_keys if k.startswith(kind)}) > 1
                          for kind in ("gtin:", "app:", "MANUFACTURER_PART_NUMBER:", "MANUFACTURER_MODEL_NUMBER:"))
-    result.gate("content_hash_product_merge", content_merges, max(len(dup_hashes), 1))
-    multi = [e for e in p.entities if len(e.artifact_ids) > 1]
-    result.gate("distinct_strong_ids_collapsed", collapsed, max(len(multi), 1))
+    # Denominators below count real opportunities only; a case with none adds zero.
+    result.gate("content_hash_product_merge", content_merges, len(dup_hashes))
+    distinct_pairs = 0
+    for kind in ("gtin:", "app:", "MANUFACTURER_PART_NUMBER:", "MANUFACTURER_MODEL_NUMBER:"):
+        n_keys = len({k for a in fetched for k in keys(a) if k.startswith(kind)})
+        distinct_pairs += n_keys * (n_keys - 1) // 2
+    result.gate("distinct_strong_ids_collapsed", collapsed, distinct_pairs)
     verified = [e for e in p.entities if e.identity_status.value == "VERIFIED_STRONG_IDENTITY"]
     def backs(identifier, key: str | None) -> bool:
         """An identifier on the page that independently justifies ``key``."""
@@ -443,7 +447,7 @@ def _product_gates(result: CaseResult, p: ProductPriorArtRun, world: CaseWorld) 
     result.gate("content_hash_as_verified_identity",
                 sum(not any(backs(i, e.identity_key) for a in e.artifact_ids for i in by_artifact[a].identifiers)
                     for e in verified),
-                max(len(verified), 1))
+                len(verified))
     dup_pairs = lost = 0
     for h in sorted(dup_hashes):
         owners = sorted({owner_of[a.artifact_id] for a in fetched if a.content_hash == h and a.artifact_id in owner_of}, key=str)
@@ -452,7 +456,7 @@ def _product_gates(result: CaseResult, p: ProductPriorArtRun, world: CaseWorld) 
                 dup_pairs += 1
                 lost += not any(l.other_entity_id == y and l.basis.value == "IDENTICAL_CONTENT_HASH"
                                 for l in by_entity[x].probable_links)
-    result.gate("duplicate_content_relation_lost", lost, max(dup_pairs, 1))
+    result.gate("duplicate_content_relation_lost", lost, dup_pairs)
     key_owner: dict[str, set] = defaultdict(set)
     for entity in p.entities:
         if entity.identity_status.value == "VERIFIED_STRONG_IDENTITY":
