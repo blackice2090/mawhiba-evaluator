@@ -44,5 +44,8 @@ Connector: `src/research/discovery/safe_fetch.py` (`SafeWebFetcher`).
 | state | fresh client per fetch (no cookie persistence), `trust_env=False` (no environment proxies), no credentials, no JavaScript |
 | record | original URL, final URL, redirect chain, content type, retrieval time, SHA-256 of the body, bounded text |
 
-Known limitation: names are resolved before connecting, so DNS rebinding
-between check and connect is not fully closed by this layer alone.
+DNS rebinding (Phase 2H.1): the connection is pinned. `PinnedNetworkBackend`
+resolves inside the connect step, requires every answer to be public, connects
+to a validated IP literal and re-checks the peer address; TLS SNI, certificate
+verification and `Host` use the URL hostname. No unvalidated second lookup
+exists.

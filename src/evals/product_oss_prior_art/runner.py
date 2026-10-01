@@ -59,8 +59,11 @@ GATES: tuple[str, ...] = (
     "automatic_claim_status_update", "automatic_project_score_update", "phase2f_score_modified",
     "provider_credential_persisted", "documented_only_reported_live", "candidate_type_conflation",
     "unbounded_recursive_expansion",
+    # Phase 2H.1: content equality is artifact duplication, never product identity.
+    "content_hash_product_merge", "distinct_strong_ids_collapsed", "content_hash_as_verified_identity",
+    "duplicate_content_relation_lost",
 )
-assert len(GATES) == 64
+assert len(GATES) == 68
 
 FORBIDDEN_KEY_PATTERNS: dict[str, re.Pattern[str]] = {
     "novelty_score_produced": re.compile(r'"(novelty_score|novelty_strength|similarity(_score)?|relevance_score)"'),
@@ -170,7 +173,7 @@ KEY_FAMILY: dict[str, str] = {
     "artifact_statuses": "safe_fetch", "redirects_recorded": "safe_fetch",
     "roles": "source_role", "first_party": "source_role",
     "entities": "product_identity", "strong": "product_identity", "conflicted": "product_identity",
-    "grouping_bases_includes": "product_identity",
+    "grouping_bases_includes": "product_identity", "content_links": "weak_identity_non_collapse",
     "probable": "weak_identity_non_collapse", "unresolved": "weak_identity_non_collapse",
     "upper_bound": "listing_anti_inflation", "lower_bound": "listing_anti_inflation",
     "vendor_launch_dates": "product_chronology",
@@ -241,6 +244,9 @@ def summarize(after: EvaluationGraphState, world: CaseWorld) -> dict[str, Any]:
             "product.unresolved": sum(1 for e in p.entities if e.identity_status.value == "UNRESOLVED_IDENTITY"),
             "product.conflicted": sum(1 for e in p.entities if e.conflicting_strong_keys),
             "product.grouping_bases": sorted({e.grouping_basis.value for e in p.entities}),
+            "product.content_links": sum(
+                1 for e in p.entities if any(l.basis.value == "IDENTICAL_CONTENT_HASH" for l in e.probable_links)
+            ),
             "product.upper_bound": p.distinct_product_count_upper_bound,
             "product.lower_bound": p.distinct_product_count_lower_bound,
             "product.candidates": len(p.candidates),
@@ -391,14 +397,62 @@ def _product_gates(result: CaseResult, p: ProductPriorArtRun, world: CaseWorld) 
         while frontier:
             cur = frontier.pop()
             for other in members:
-                if other.artifact_id not in reached and (keys(cur) & keys(other) or cur.content_hash == other.content_hash):
+                if other.artifact_id not in reached and keys(cur) & keys(other):
                     reached.add(other.artifact_id)
                     frontier.append(other)
         unjustified += len(reached) != len(members)
     result.gate("title_only_product_collapse", unjustified, max(len(p.entities), 1))
     probable = [e for e in p.entities if e.identity_status.value == "PROBABLE_IDENTITY"]
     result.gate("probable_identity_destructively_merged",
-                sum(len(e.artifact_ids) > 1 and e.grouping_basis.value != "IDENTICAL_CONTENT_HASH" for e in probable), max(len(probable), 1))
+                sum(len(e.artifact_ids) > 1 for e in probable), max(len(probable), 1))
+    # Phase 2H.1, re-derived from bytes and independently validated keys only.
+    dup_hashes = {h for h, n in Counter(a.content_hash for a in fetched).items() if h and n > 1}
+    owner_of = {a: e.entity_id for e in p.entities for a in e.artifact_ids}
+    by_entity = {e.entity_id: e for e in p.entities}
+    content_merges = 0
+    collapsed = 0
+    for entity in p.entities:
+        members = [by_artifact[i] for i in entity.artifact_ids]
+        if len(members) < 2:
+            continue
+        key_linked, frontier = {members[0].artifact_id}, [members[0]]
+        while frontier:
+            cur = frontier.pop()
+            for other in members:
+                if other.artifact_id not in key_linked and keys(cur) & keys(other):
+                    key_linked.add(other.artifact_id)
+                    frontier.append(other)
+        content_merges += len(key_linked) != len(members) and len({a.content_hash for a in members}) < len(members)
+        all_keys = {k for a in members for k in keys(a)}
+        collapsed += any(len({k for k in all_keys if k.startswith(kind)}) > 1
+                         for kind in ("gtin:", "app:", "MANUFACTURER_PART_NUMBER:", "MANUFACTURER_MODEL_NUMBER:"))
+    result.gate("content_hash_product_merge", content_merges, max(len(dup_hashes), 1))
+    multi = [e for e in p.entities if len(e.artifact_ids) > 1]
+    result.gate("distinct_strong_ids_collapsed", collapsed, max(len(multi), 1))
+    verified = [e for e in p.entities if e.identity_status.value == "VERIFIED_STRONG_IDENTITY"]
+    def backs(identifier, key: str | None) -> bool:
+        """An identifier on the page that independently justifies ``key``."""
+        if identifier.strong_key != key:
+            return False
+        if identifier.kind.value == "GTIN":
+            return independent_gtin_ok(identifier.value)
+        if identifier.kind.value in ("MANUFACTURER_PART_NUMBER", "MANUFACTURER_MODEL_NUMBER"):
+            return bool(identifier.brand)
+        return identifier.kind.value == "APP_PACKAGE_ID"
+
+    result.gate("content_hash_as_verified_identity",
+                sum(not any(backs(i, e.identity_key) for a in e.artifact_ids for i in by_artifact[a].identifiers)
+                    for e in verified),
+                max(len(verified), 1))
+    dup_pairs = lost = 0
+    for h in sorted(dup_hashes):
+        owners = sorted({owner_of[a.artifact_id] for a in fetched if a.content_hash == h and a.artifact_id in owner_of}, key=str)
+        for i, x in enumerate(owners):
+            for y in owners[i + 1:]:
+                dup_pairs += 1
+                lost += not any(l.other_entity_id == y and l.basis.value == "IDENTICAL_CONTENT_HASH"
+                                for l in by_entity[x].probable_links)
+    result.gate("duplicate_content_relation_lost", lost, max(dup_pairs, 1))
     key_owner: dict[str, set] = defaultdict(set)
     for entity in p.entities:
         if entity.identity_status.value == "VERIFIED_STRONG_IDENTITY":
@@ -607,6 +661,13 @@ def apply_controls(result: CaseResult, run: ResearchRun) -> None:
     if "title_merge" in names:
         controls.append(("title_merge", "title_only_product_collapse", lambda: _merge_unrelated(p)))
         controls.append(("probable_merge", "probable_identity_destructively_merged", lambda: _merge_unrelated(p)))
+    if "content_merge" in names:
+        controls.append(("content_merge", "content_hash_product_merge", lambda: _merge_duplicates(p, verified=False)))
+        controls.append(("content_verified", "content_hash_as_verified_identity", lambda: _merge_duplicates(p, verified=True)))
+        controls.append(("duplicate_link_dropped", "duplicate_content_relation_lost", lambda: _drop_content_links(p)))
+    if "distinct_ids_merge" in names:
+        controls.append(("distinct_ids_merge", "distinct_strong_ids_collapsed",
+                         lambda: _merge_duplicates(p, verified=True, conflicted=True)))
     if "complete_with_truncation" in names:
         truncated_p = p.budget.model_copy(update={"results_truncated": 1})
         truncated_o = o.budget.model_copy(update={"pages_truncated": 1})
@@ -709,12 +770,57 @@ def _merge_unrelated(p: ProductPriorArtRun) -> Any:
             hb = {by_artifact[x].content_hash for x in b.artifact_ids}
             if not ka & kb and not ha & hb:
                 merged = a.model_copy(update={"artifact_ids": [*a.artifact_ids, *b.artifact_ids],
-                                              "grouping_basis": "IDENTICAL_CONTENT_HASH", "identity_status": "UNRESOLVED_IDENTITY",
+                                              "grouping_basis": "SHARED_STRONG_IDENTIFIER", "identity_status": "UNRESOLVED_IDENTITY",
                                               "identity_key": None, "strong_identifiers": [], "probable_links": []})
                 return _with(p, entities=[merged], candidates=[])
     # No unrelated pair: forge one from a single entity and a fabricated artifact id.
-    forged = entities[0].model_copy(update={"artifact_ids": [*entities[0].artifact_ids, uuid4()], "grouping_basis": "IDENTICAL_CONTENT_HASH"})
+    forged = entities[0].model_copy(update={"artifact_ids": [*entities[0].artifact_ids, uuid4()], "grouping_basis": "SHARED_STRONG_IDENTIFIER"})
     return _with(p, entities=[forged], candidates=[])
+
+
+def _merge_duplicates(p: ProductPriorArtRun, *, verified: bool, conflicted: bool = False) -> Any:
+    """Collapse two separate entities whose artifacts are byte-identical (Phase 2H.1).
+
+    ``verified`` forges a strong identity for the merge, borrowing a member's
+    key when one exists; ``conflicted`` picks a pair carrying different strong
+    keys of one kind.
+    """
+    by_artifact = {a.artifact_id: a for a in p.artifacts}
+    entities = list(p.entities)
+    for i, a in enumerate(entities):
+        for b in entities[i + 1:]:
+            ha = {by_artifact[x].content_hash for x in a.artifact_ids}
+            hb = {by_artifact[x].content_hash for x in b.artifact_ids}
+            if not ha & hb or (conflicted and not (a.conflicting_strong_keys or b.conflicting_strong_keys)):
+                continue
+            ids = [*a.artifact_ids, *b.artifact_ids]
+            update: dict[str, Any] = {"artifact_ids": ids, "probable_links": []}
+            if verified:
+                keys = sorted({k for x in ids for k in by_artifact[x].strong_keys})
+                key = keys[0] if keys else "gtin:00000000000000"
+                found = [ident for x in ids for ident in by_artifact[x].identifiers if ident.strong_key == key][:1]
+                update.update({"identity_status": "VERIFIED_STRONG_IDENTITY", "identity_key": key, "strong_identifiers": found,
+                               "conflicting_strong_keys": [], "grouping_basis": "STRONG_IDENTIFIER_AND_IDENTICAL_CONTENT"})
+            else:
+                update.update({"identity_status": "UNRESOLVED_IDENTITY", "identity_key": None, "strong_identifiers": [],
+                               "grouping_basis": "SHARED_STRONG_IDENTIFIER"})
+            others = [e for e in entities if e.entity_id not in (a.entity_id, b.entity_id)]
+            return _with(p, entities=[*others, a.model_copy(update=update)], candidates=[])
+    raise AssertionError("negative control needs two byte-identical entities")
+
+
+def _drop_content_links(p: ProductPriorArtRun) -> Any:
+    """Erase the duplicate-content relation between separate entities."""
+    stripped = [
+        e.model_copy(update={
+            "probable_links": (kept := [l for l in e.probable_links if l.basis.value != "IDENTICAL_CONTENT_HASH"]),
+            "identity_status": e.identity_status if kept or e.identity_key else "UNRESOLVED_IDENTITY",
+        })
+        for e in p.entities
+    ]
+    if stripped == list(p.entities):
+        raise AssertionError("negative control needs a duplicate-content link")
+    return _with(p, entities=stripped, candidates=[])
 
 
 # ---------------------------------------------------------------------------

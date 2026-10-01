@@ -55,7 +55,8 @@ is `UNKNOWN`, and unknown stays unknown.
 **Strong product identity collapses; weak identity links.** Artifacts join one
 `ProductEntity` only on a strong key read from the page's own structured data
 (a GTIN with a valid check digit, an app package id, or an MPN/model number
-qualified by a stated brand) or on byte-identical content. A shared retailer
+qualified by a stated brand). Byte-identical content is *not* identity
+(Phase 2H.1): it is an `IDENTICAL_CONTENT_HASH` probable link. A shared retailer
 SKU, the same stated brand and product name, or an unqualified model number is
 a *probable link* between entities that stay separate. Two different keys of
 the same kind in one group are ambiguous and never merge on identifiers. One
@@ -112,9 +113,10 @@ judgement fields.
   candidates while preserving each type's identity and date semantics.
 - Product identity is often `UNRESOLVED_IDENTITY`. That is the honest default
   for pages without structured identifiers.
-- The SSRF check resolves names before connecting. A DNS answer that changes
-  between check and connect (DNS rebinding) is not fully closed by this layer
-  alone. This is documented as a remaining limitation.
+- DNS rebinding was a documented limitation of Phase 2H and is closed in
+  Phase 2H.1: the live transport pins each connection to an address it
+  validated in the same resolution, re-checks the peer, and keeps TLS and
+  `Host` bound to the hostname.
 - Forks are grouped for counting but preserved for inspection, because grouping
   is a counting rule, not a claim that the code is identical.
 

@@ -16,8 +16,10 @@ Four distinctions this module refuses to collapse:
   host registry. ``FIRST_PARTY_*`` is never inferred from a title or from
   vendor text on the page; anything unproven stays ``UNKNOWN``.
 * **listing vs product.** Artifacts collapse into one entity only on a strong
-  identifier or byte-identical content. A shared SKU or a similar name is a
-  *probable link* between separate entities, never a merge.
+  identifier. Byte-identical content is artifact-level duplication, not
+  product identity (Phase 2H.1): it is recorded as an
+  ``IDENTICAL_CONTENT_HASH`` probable link between separate entities, exactly
+  like a shared SKU or a similar name, and never merges anything.
 * **page date vs availability.** Six date facts stay separate, every one is
   source-reported, and the retrieval date is never a historical date.
 
@@ -59,7 +61,7 @@ from src.schemas.discovery import (
 )
 
 PRODUCT_CONTRACT_VERSION = "PRODUCT-PRIOR-ART-CONTRACT-V1"
-PRODUCT_IDENTITY_VERSION = "PRODUCT-IDENTITY-V1"
+PRODUCT_IDENTITY_VERSION = "PRODUCT-IDENTITY-V2"
 PRODUCT_CHRONOLOGY_VERSION = "PRODUCT-CHRONOLOGY-V1"
 
 MAX_PRODUCT_SNIPPET_CHARS = 1_000
@@ -295,11 +297,15 @@ class ProductIdentityStatus(StrEnum):
 
 
 class ArtifactGroupingBasis(StrEnum):
-    """Why more than one artifact sits in one entity. Titles are not a basis."""
+    """Why more than one artifact sits in one entity. Titles are not a basis.
+
+    Content equality is not a basis either (Phase 2H.1): every multi-artifact
+    basis is a shared strong identifier. ``STRONG_IDENTIFIER_AND_IDENTICAL_CONTENT``
+    only *describes* a strong-key group whose members also share bytes.
+    """
 
     SINGLE_ARTIFACT = "SINGLE_ARTIFACT"
     SHARED_STRONG_IDENTIFIER = "SHARED_STRONG_IDENTIFIER"
-    IDENTICAL_CONTENT_HASH = "IDENTICAL_CONTENT_HASH"
     STRONG_IDENTIFIER_AND_IDENTICAL_CONTENT = "STRONG_IDENTIFIER_AND_IDENTICAL_CONTENT"
 
 
@@ -307,6 +313,8 @@ class ProbableLinkBasis(StrEnum):
     SHARED_RETAILER_SKU = "SHARED_RETAILER_SKU"
     SAME_STATED_BRAND_AND_PRODUCT_NAME = "SAME_STATED_BRAND_AND_PRODUCT_NAME"
     SAME_UNQUALIFIED_MODEL_NUMBER = "SAME_UNQUALIFIED_MODEL_NUMBER"
+    IDENTICAL_CONTENT_HASH = "IDENTICAL_CONTENT_HASH"
+    """Byte-identical pages: a duplicate-content relation, never an identity."""
 
 
 class ProbableProductLink(MawhibaModel):
@@ -350,11 +358,10 @@ class ProductEntity(MawhibaModel):
         multi = len(self.artifact_ids) > 1
         if multi == (self.grouping_basis is ArtifactGroupingBasis.SINGLE_ARTIFACT):
             raise ValueError("grouping_basis must justify exactly the artifacts grouped")
-        if self.grouping_basis in (
-            ArtifactGroupingBasis.SHARED_STRONG_IDENTIFIER,
-            ArtifactGroupingBasis.STRONG_IDENTIFIER_AND_IDENTICAL_CONTENT,
-        ) and status is not ProductIdentityStatus.VERIFIED_STRONG_IDENTITY:
-            raise ValueError("a strong-identifier grouping requires a verified strong identity")
+        if multi and status is not ProductIdentityStatus.VERIFIED_STRONG_IDENTITY:
+            # Phase 2H.1: only a verified strong identity may hold several
+            # artifacts. Identical bytes, a SKU or a name never merge.
+            raise ValueError("a multi-artifact entity requires a verified strong identity")
         if any(l.other_entity_id == self.entity_id for l in self.probable_links):
             raise ValueError("an entity cannot link to itself")
         return self
@@ -581,10 +588,16 @@ class ProductPriorArtRun(MawhibaModel):
                 keys = {k for a in entity.artifact_ids for k in by_artifact[a].strong_keys}
                 if entity.identity_key not in keys:
                     raise ValueError("a strong identity must be read from its artifacts")
+                if any(len({k for k in keys if k.startswith(kind)}) > 1 for kind in STRONG_KEY_KINDS):
+                    raise ValueError(
+                        "artifacts carrying different strong identifiers of one kind "
+                        "cannot be one verified identity (Phase 2H.1)"
+                    )
             if len(entity.artifact_ids) > 1:
                 _require_justified_grouping(entity, by_artifact)
         if len(set(grouped)) != len(grouped):
             raise ValueError("an artifact belongs to at most one entity")
+        _require_duplicate_content_links(self.entities, by_artifact)
         identity_keys = [e.identity_key for e in self.entities if e.identity_key is not None]
         if len(set(identity_keys)) != len(identity_keys):
             raise ValueError(
@@ -669,11 +682,45 @@ class ProductPriorArtRun(MawhibaModel):
         return len({find(e) for e in parent})
 
 
+STRONG_KEY_KINDS = ("gtin:", "app:", "manufacturer_part_number:", "manufacturer_model_number:")
+
+
+def _require_duplicate_content_links(
+    entities: list[ProductEntity], by_artifact: dict[UUID, ProductSourceArtifact]
+) -> None:
+    """Separate entities holding byte-identical artifacts must say so (Phase 2H.1).
+
+    Duplication is kept as a visible, non-destructive relation; it can be
+    neither a merge nor silently dropped.
+    """
+    owners: dict[str, set[UUID]] = {}
+    for entity in entities:
+        for artifact_id in entity.artifact_ids:
+            content_hash = by_artifact[artifact_id].content_hash
+            if content_hash:
+                owners.setdefault(content_hash, set()).add(entity.entity_id)
+    links = {
+        (e.entity_id, l.other_entity_id)
+        for e in entities
+        for l in e.probable_links
+        if l.basis is ProbableLinkBasis.IDENTICAL_CONTENT_HASH
+    }
+    for owner_ids in owners.values():
+        for a in owner_ids:
+            for b in owner_ids:
+                if a != b and (a, b) not in links:
+                    raise ValueError(
+                        "separate entities with byte-identical artifacts must carry an "
+                        "IDENTICAL_CONTENT_HASH link (Phase 2H.1)"
+                    )
+
+
 def _require_justified_grouping(
     entity: ProductEntity, by_artifact: dict[UUID, ProductSourceArtifact]
 ) -> None:
     """Re-derive that a multi-artifact entity is connected only by strong
-    identifiers or identical content -- never by a title (section 16)."""
+    identifiers -- never by a title, and never by identical content
+    (section 16, Phase 2H.1)."""
     ids = list(entity.artifact_ids)
     reached = {ids[0]}
     frontier = [ids[0]]
@@ -683,15 +730,13 @@ def _require_justified_grouping(
             if other_id in reached:
                 continue
             other = by_artifact[other_id]
-            shares_key = bool(set(current.strong_keys) & set(other.strong_keys))
-            same_content = current.content_hash == other.content_hash
-            if shares_key or same_content:
+            if set(current.strong_keys) & set(other.strong_keys):
                 reached.add(other_id)
                 frontier.append(other_id)
     if reached != set(ids):
         raise ValueError(
-            "a product entity groups artifacts that share neither a strong "
-            "identifier nor identical content (section 16)"
+            "a product entity groups artifacts that do not share a strong "
+            "identifier; identical content is not product identity (section 16)"
         )
 
 

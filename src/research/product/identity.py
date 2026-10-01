@@ -2,13 +2,16 @@
 
 Grouping rule, the whole of it:
 
-* Two fetched artifacts join one entity when they share a strong identifier
-  key, or when their bytes are identical (one document served at two URLs).
-* Nothing else merges. A shared retailer SKU, the same stated brand and
-  product name, or the same unqualified model number is recorded as a
-  *probable link* between two entities that stay separate.
-* An entity whose artifacts carry two different strong keys (possible only via
-  identical content) is never a verified identity; the conflict is recorded.
+* Two fetched artifacts join one entity only when they share a strong
+  identifier key.
+* Nothing else merges. Byte-identical content (Phase 2H.1: duplication is an
+  artifact-level fact, not product identity -- boilerplate, placeholders and
+  one template serving many products all hash alike), a shared retailer SKU,
+  the same stated brand and product name, or the same unqualified model
+  number is recorded as a *probable link* between entities that stay separate.
+* A group whose artifacts carry two different strong keys of one kind is
+  never a verified identity: its members are split back into single-artifact
+  entities and the conflict is recorded on each.
 
 So twelve marketplace listings of one GTIN are one product, three listings of
 a similar title are three entities with probable links, and the reader sees
@@ -92,12 +95,11 @@ def resolve_entities(artifacts: list[ProductSourceArtifact], research_run_id: UU
             parent[max(ra, rb, key=str)] = min(ra, rb, key=str)
 
     by_key: dict[str, list[UUID]] = defaultdict(list)
-    by_hash: dict[str, list[UUID]] = defaultdict(list)
     for artifact in fetched:
         for key in artifact.strong_keys:
             by_key[key].append(artifact.artifact_id)
-        by_hash[artifact.content_hash or ""].append(artifact.artifact_id)
-    for ids in [*by_key.values(), *by_hash.values()]:
+    # Strong keys are the only union. A content hash never joins two artifacts.
+    for ids in by_key.values():
         for other in ids[1:]:
             union(ids[0], other)
 
@@ -106,34 +108,24 @@ def resolve_entities(artifacts: list[ProductSourceArtifact], research_run_id: UU
         groups[find(artifact.artifact_id)].append(artifact)
 
     # A group holding two different keys of the same kind (two GTINs, two
-    # brand+MPN values) is ambiguous. It is never merged on identifiers:
-    # its members fall back to identical-content grouping only.
+    # brand+MPN values) is ambiguous. It is never merged: every member stands
+    # alone and records the conflict.
     settled: list[tuple[list[ProductSourceArtifact], list[str]]] = []
     for members in groups.values():
         conflicts = _same_kind_conflicts(members)
         if not conflicts or len(members) == 1:
             settled.append((members, conflicts))
             continue
-        by_content: dict[str, list[ProductSourceArtifact]] = defaultdict(list)
-        for artifact in members:
-            by_content[artifact.content_hash or ""].append(artifact)
-        settled.extend((part, _same_kind_conflicts(part)) for part in by_content.values())
+        settled.extend(([artifact], conflicts) for artifact in members)
 
     drafts: list[dict] = []
     for members, conflicts in settled:
-        ids = {a.artifact_id for a in members}
-        by_strong = len(members) > 1 and not conflicts and any(
-            len(ids & set(key_ids)) > 1 for key_ids in by_key.values()
-        )
-        by_content = len(members) > len({a.content_hash for a in members})
         if len(members) == 1:
             basis = ArtifactGroupingBasis.SINGLE_ARTIFACT
-        elif by_strong and by_content:
+        elif len(members) > len({a.content_hash for a in members}):
             basis = ArtifactGroupingBasis.STRONG_IDENTIFIER_AND_IDENTICAL_CONTENT
-        elif by_strong:
-            basis = ArtifactGroupingBasis.SHARED_STRONG_IDENTIFIER
         else:
-            basis = ArtifactGroupingBasis.IDENTICAL_CONTENT_HASH
+            basis = ArtifactGroupingBasis.SHARED_STRONG_IDENTIFIER
         identity_key = None if conflicts else _canonical_key(members)
         entity_seed = identity_key or "artifacts:" + ",".join(sorted(str(a.artifact_id) for a in members))
         drafts.append(
@@ -150,6 +142,8 @@ def resolve_entities(artifacts: list[ProductSourceArtifact], research_run_id: UU
     signatures: dict[tuple[ProbableLinkBasis, str], set[UUID]] = defaultdict(set)
     for draft in drafts:
         for artifact in draft["members"]:
+            if artifact.content_hash:
+                signatures[(ProbableLinkBasis.IDENTICAL_CONTENT_HASH, artifact.content_hash)].add(draft["entity_id"])
             for identifier in artifact.identifiers:
                 if identifier.kind is ProductIdentifierKind.SKU:
                     signatures[(ProbableLinkBasis.SHARED_RETAILER_SKU, _fold(identifier.value))].add(draft["entity_id"])

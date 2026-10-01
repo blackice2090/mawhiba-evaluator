@@ -21,9 +21,15 @@ Bodies are read with a hard byte limit; an oversized body is refused with
 cookie is kept between requests, environment proxies are ignored, and no
 credential is ever sent.
 
-Known limitation (documented in ADR-019): name resolution happens before the
-connection, so a host whose DNS answer changes between the check and the
-connect (DNS rebinding) is not fully closed by this layer alone.
+DNS rebinding (Phase 2H.1): the pre-request check above is not what protects
+the connection. The live transport resolves the host itself, inside the
+connect step, requires every answer to be public, connects only to one of
+those validated addresses, and re-checks the connected peer address before a
+byte is sent. Nothing ever performs a second, unvalidated lookup, so a DNS
+answer that changes between the check and the connect cannot reach a private
+address. TLS server name and certificate verification, and the HTTP ``Host``
+header, still use the URL's hostname, never the pinned IP. Every redirect hop
+goes through the same check and the same pinned connect.
 """
 
 from __future__ import annotations
@@ -177,44 +183,200 @@ class FetchTransport(Protocol):
 
 
 class FetchTransportError(Exception):
-    def __init__(self, kind: DiscoveryErrorKind) -> None:
+    def __init__(self, kind: DiscoveryErrorKind, *, refusal: UrlRefusal | None = None) -> None:
         super().__init__(kind.value)
         self.kind = kind
+        self.refusal = refusal
+
+
+class UnsafeDestinationError(Exception):
+    """Raised inside the connect step: no validated public address to connect to."""
+
+    def __init__(self, refusal: UrlRefusal) -> None:
+        super().__init__(refusal.value)
+        self.refusal = refusal
+
+
+Connector = Callable[..., Any]
+"""``(host, port, timeout, local_address, socket_options) -> NetworkStream``.
+
+Called only with an IP literal that has already been validated as public."""
+
+
+def _default_connector(**kwargs: Any) -> Any:
+    from httpcore._backends.sync import SyncBackend
+
+    return SyncBackend().connect_tcp(**kwargs)
+
+
+def _same_address(a: str, b: str) -> bool:
+    try:
+        x = ipaddress.ip_address(a.split("%")[0])
+        y = ipaddress.ip_address(b.split("%")[0])
+    except ValueError:
+        return False
+    if isinstance(x, ipaddress.IPv6Address) and x.ipv4_mapped is not None:
+        x = x.ipv4_mapped
+    if isinstance(y, ipaddress.IPv6Address) and y.ipv4_mapped is not None:
+        y = y.ipv4_mapped
+    return x == y
+
+
+class PinnedNetworkBackend:
+    """An httpcore network backend that can only connect to validated addresses.
+
+    httpcore asks the backend to ``connect_tcp(host, ...)`` with the URL's
+    hostname and later performs TLS with ``server_hostname`` taken from the
+    URL origin. This backend is therefore the single place the destination IP
+    is chosen: it resolves once, refuses unless *every* answer is public,
+    connects to a validated literal IP, and verifies the connected peer is the
+    address it validated. TLS and ``Host`` are untouched.
+    """
+
+    def __init__(self, resolver: Resolver = system_resolver, connector: Connector | None = None) -> None:
+        self._resolver = resolver
+        self._connector = connector or _default_connector
+        self.connected: list[tuple[str, str, int]] = []
+        """(hostname, validated IP, port) for every connection actually made."""
+
+    def _validated_addresses(self, host: str) -> list[str]:
+        host = host.strip("[]").rstrip(".").lower()
+        try:
+            ipaddress.ip_address(host)
+            addresses = [host]
+        except ValueError:
+            if host in BLOCKED_HOSTNAMES or host.endswith(BLOCKED_SUFFIXES):
+                raise UnsafeDestinationError(UrlRefusal.BLOCKED_HOSTNAME) from None
+            try:
+                addresses = list(self._resolver(host))
+            except (OSError, UnicodeError):
+                raise UnsafeDestinationError(UrlRefusal.UNRESOLVABLE_HOST) from None
+        if not addresses:
+            raise UnsafeDestinationError(UrlRefusal.UNRESOLVABLE_HOST)
+        if not all(is_public_address(a) for a in addresses):
+            raise UnsafeDestinationError(UrlRefusal.NON_PUBLIC_ADDRESS)
+        return addresses
+
+    def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> Any:
+        if port not in ALLOWED_PORTS:
+            raise UnsafeDestinationError(UrlRefusal.DISALLOWED_PORT)
+        addresses = self._validated_addresses(host)
+        import httpcore
+
+        last_error: Exception | None = None
+        for address in addresses:
+            try:
+                stream = self._connector(
+                    host=address,
+                    port=port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                last_error = exc
+                continue
+            peer = stream.get_extra_info("server_addr")
+            peer_ip = peer[0] if isinstance(peer, tuple) and peer else None
+            if peer_ip is None or not _same_address(str(peer_ip), address) or not is_public_address(str(peer_ip)):
+                stream.close()
+                raise UnsafeDestinationError(UrlRefusal.NON_PUBLIC_ADDRESS)
+            self.connected.append((host, address, port))
+            return stream
+        assert last_error is not None
+        raise last_error
+
+    def connect_unix_socket(self, *args: Any, **kwargs: Any) -> Any:
+        raise UnsafeDestinationError(UrlRefusal.NOT_HTTP)
+
+    def sleep(self, seconds: float) -> None:  # pragma: no cover - retries are 0
+        import time
+
+        time.sleep(seconds)
+
+
+def verified_ssl_context() -> Any:
+    """Certificate and hostname verification on, against the certifi bundle."""
+    import ssl
+
+    import certifi
+
+    context = ssl.create_default_context(cafile=certifi.where())
+    context.check_hostname = True
+    context.verify_mode = ssl.CERT_REQUIRED
+    return context
 
 
 class HttpxFetchTransport:
-    """Live transport: one fresh client per request, so no cookie survives."""
+    """Live transport with DNS-pinned connections.
+
+    One fresh connection pool per request, so no cookie and no connection
+    survives. No proxy is ever used (the pool is built directly, with no
+    environment lookup), so the pinned backend is always the thing connecting.
+    """
+
+    def __init__(self, resolver: Resolver = system_resolver, connector: Connector | None = None) -> None:
+        self._resolver = resolver
+        self._connector = connector
+        self.last_backend: PinnedNetworkBackend | None = None
 
     def get(self, url: str, *, max_bytes: int, timeout: float) -> RawResponse:
-        import httpx
+        import httpcore
 
+        backend = PinnedNetworkBackend(self._resolver, self._connector)
+        self.last_backend = backend
+        parts = urlsplit(url)
+        host_header = parts.hostname or ""
+        if ":" in host_header:
+            host_header = f"[{host_header}]"
+        if parts.port is not None and parts.port not in (80, 443):
+            host_header = f"{host_header}:{parts.port}"
         try:
-            with httpx.Client(
-                follow_redirects=False,
-                timeout=timeout,
-                trust_env=False,
-                headers={"User-Agent": USER_AGENT, "Accept": "text/html, text/plain"},
-            ) as client:
-                with client.stream("GET", url) as response:
+            with httpcore.ConnectionPool(
+                ssl_context=verified_ssl_context(),
+                network_backend=backend,
+                retries=0,
+                http1=True,
+                http2=False,
+            ) as pool:
+                with pool.stream(
+                    "GET",
+                    url,
+                    headers=[
+                        (b"Host", host_header.encode("ascii")),
+                        (b"User-Agent", USER_AGENT.encode("ascii")),
+                        (b"Accept", b"text/html, text/plain"),
+                    ],
+                    extensions={"timeout": {"connect": timeout, "read": timeout, "write": timeout, "pool": timeout}},
+                ) as response:
                     chunks: list[bytes] = []
                     size = 0
                     over = False
-                    if not response.is_redirect:
-                        for chunk in response.iter_bytes():
+                    if not (300 <= response.status < 400):
+                        for chunk in response.iter_stream():
                             size += len(chunk)
                             if size > max_bytes:
                                 over = True
                                 break
                             chunks.append(chunk)
                     return RawResponse(
-                        status=response.status_code,
-                        headers={k.lower(): v for k, v in response.headers.items()},
+                        status=response.status,
+                        headers={k.decode("latin-1").lower(): v.decode("latin-1") for k, v in response.headers},
                         body=b"".join(chunks),
                         over_limit=over,
                     )
-        except httpx.TimeoutException as exc:
+        except UnsafeDestinationError as exc:
+            raise FetchTransportError(DiscoveryErrorKind.FETCH_UNSAFE, refusal=exc.refusal) from exc
+        except httpcore.TimeoutException as exc:
             raise FetchTransportError(DiscoveryErrorKind.TIMEOUT) from exc
-        except httpx.HTTPError as exc:
+        except (httpcore.NetworkError, httpcore.ProtocolError, httpcore.UnsupportedProtocol, OSError) as exc:
             raise FetchTransportError(DiscoveryErrorKind.CONNECTION_ERROR) from exc
 
 
@@ -251,6 +413,7 @@ class FetchOutcome:
 _STATUS_FOR_ERROR: dict[DiscoveryErrorKind, ProductFetchStatus] = {
     DiscoveryErrorKind.TIMEOUT: ProductFetchStatus.TIMEOUT,
     DiscoveryErrorKind.CONNECTION_ERROR: ProductFetchStatus.CONNECTION_ERROR,
+    DiscoveryErrorKind.FETCH_UNSAFE: ProductFetchStatus.FETCH_UNSAFE,
 }
 
 
@@ -267,7 +430,7 @@ class SafeWebFetcher:
         timeout_seconds: float = 15.0,
         clock: Callable[[], datetime] | None = None,
     ) -> None:
-        self._transport = transport or HttpxFetchTransport()
+        self._transport = transport or HttpxFetchTransport(resolver)
         self._resolver = resolver
         self.max_redirects = max_redirects
         self.max_bytes = max_bytes
@@ -298,6 +461,7 @@ class SafeWebFetcher:
             except FetchTransportError as exc:
                 outcome.status = _STATUS_FOR_ERROR.get(exc.kind, ProductFetchStatus.CONNECTION_ERROR)
                 outcome.error_kind = exc.kind
+                outcome.refusal = exc.refusal
                 return outcome
             headers = {k.lower(): v for k, v in response.headers.items()}
             if 300 <= response.status < 400 and response.status != 304:
@@ -369,7 +533,9 @@ __all__ = [
     "FetchTransport",
     "FetchTransportError",
     "HttpxFetchTransport",
+    "PinnedNetworkBackend",
     "RawResponse",
+    "UnsafeDestinationError",
     "Resolver",
     "SafeWebFetcher",
     "UrlRefusal",

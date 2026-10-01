@@ -433,7 +433,9 @@ for lang in ("en", "ar"):
                  "pages": {"https://a.example.com/1": page("One", json_ld=[ld(gtin=None, name="Aqua One")]),
                            "https://b.example.com/2": page("Two", json_ld=[ld(gtin=None, name="Aqua One")])}, "settings": WIDE})
     add("p-identical-content-two-urls", lang,
-        {"product.entities": 1, "product.artifacts": 2, "product.grouping_bases_includes": ["IDENTICAL_CONTENT_HASH"], "product.strong": 0},
+        # Phase 2H.1: identical bytes are duplication, not identity -- two linked entities.
+        {"product.entities": 2, "product.artifacts": 2, "product.grouping_bases_includes": ["SINGLE_ARTIFACT"],
+         "product.strong": 0, "product.probable": 2, "product.content_links": 2},
         product={"web": {"*": hits("https://a.example.com/1", "https://mirror.example.org/1")},
                  "pages": {"https://a.example.com/1": page("Same"), "https://mirror.example.org/1": page("Same")}, "settings": WIDE})
     add("p-conflicting-strong-ids", lang,
@@ -792,6 +794,40 @@ for lang in ("en", "mixed"):
         tracks=["product", "oss"],
         product={**BOTH_WORLD["product"], "web": {"*": {"pages": [hits("https://aqua.example.com/x")], "more": True}}},
         oss={**BOTH_WORLD["oss"], "search": {"*": {"pages": [[{"id": 150, "full_name": "up/s"}]], "total": 99}}})
+
+
+# ---------------------------------------------------------------------------
+# Phase 2H.1 -- byte-identical content is never product identity.
+# Appended last so every earlier case id is unchanged.
+# ---------------------------------------------------------------------------
+
+BUNDLE = page("Bundle", json_ld=[ld(), ld(name="Other", gtin=GTIN_B)])
+for lang in ("en", "ar", "mixed"):
+    add(["p-h1-identical-bytes-distinct-strong-ids", "p-h1-content-not-identity"], lang,
+        {"product.entities": 2, "product.strong": 0, "product.conflicted": 2, "product.content_links": 2,
+         "product.grouping_bases_includes": ["SINGLE_ARTIFACT"], "product.upper_bound": 2},
+        product={"web": {"*": hits("https://a.example.com/b", "https://mirror.example.org/b")},
+                 "pages": {"https://a.example.com/b": BUNDLE, "https://mirror.example.org/b": BUNDLE}, "settings": WIDE},
+        negative_controls=["distinct_ids_merge"])
+    add(["p-h1-identical-bytes-no-strong-id", "p-h1-content-not-identity"], lang,
+        {"product.entities": 3, "product.strong": 0, "product.probable": 3, "product.content_links": 3,
+         "product.upper_bound": 3, "product.lower_bound": 1},
+        product={"web": {"*": hits("https://a.example.com/1", "https://b.example.net/2", "https://c.example.org/3")},
+                 "pages": {u: page("Same") for u in ("https://a.example.com/1", "https://b.example.net/2", "https://c.example.org/3")},
+                 "settings": WIDE},
+        negative_controls=["content_merge"])
+    add(["p-h1-duplicate-content-same-strong-id", "p-h1-content-not-identity"], lang,
+        {"product.entities": 1, "product.artifacts": 2, "product.strong": 1, "product.content_links": 0,
+         "product.grouping_bases_includes": ["STRONG_IDENTIFIER_AND_IDENTICAL_CONTENT"]},
+        product={"web": {"*": hits("https://a.example.com/x", "https://mirror.example.org/x")},
+                 "pages": {"https://a.example.com/x": page("Aqua", json_ld=[ld()]),
+                           "https://mirror.example.org/x": page("Aqua", json_ld=[ld()])}, "settings": WIDE})
+    add(["p-h1-identical-boilerplate-separate-products", "p-h1-content-not-identity"], lang,
+        {"product.entities": 2, "product.strong": 0, "product.content_links": 2, "product.upper_bound": 2},
+        product={"web": {"*": hits("https://shop.example.com/p/1", "https://shop.example.com/p/2")},
+                 "pages": {"https://shop.example.com/p/1": page("Store", body="<p>Product coming soon.</p>"),
+                           "https://shop.example.com/p/2": page("Store", body="<p>Product coming soon.</p>")},
+                 "settings": WIDE})
 
 
 def main() -> None:

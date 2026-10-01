@@ -333,14 +333,17 @@ def test_shared_sku_is_a_probable_link_not_a_merge():
     assert run.distinct_product_count_upper_bound == 2 and run.distinct_product_count_lower_bound == 1
 
 
-def test_identical_content_at_two_urls_is_one_entity():
+def test_identical_content_at_two_urls_stays_two_linked_entities():
+    # Phase 2H.1: byte-identical content is duplication, not product identity.
     page = _page("Same", ld=_ld(gtin=None, brand=None))
     run, _ = _product(
         [{"url": "https://a.example.com/1"}, {"url": "https://b.example.com/2"}],
         {"https://a.example.com/1": page, "https://b.example.com/2": page},
     )
-    assert len(run.entities) == 1 and run.entities[0].grouping_basis is ArtifactGroupingBasis.IDENTICAL_CONTENT_HASH
-    assert run.entities[0].identity_status is not ProductIdentityStatus.VERIFIED_STRONG_IDENTITY
+    assert len(run.entities) == 2
+    assert all(e.grouping_basis is ArtifactGroupingBasis.SINGLE_ARTIFACT for e in run.entities)
+    assert all(e.identity_status is ProductIdentityStatus.PROBABLE_IDENTITY for e in run.entities)
+    assert all(l.basis.value == "IDENTICAL_CONTENT_HASH" for e in run.entities for l in e.probable_links)
 
 
 def test_conflicting_gtins_never_verify():
@@ -657,8 +660,8 @@ def test_title_only_merge_rejected_by_contract():
         {"https://a.example.com/1": _page("Same title"), "https://b.example.com/2": _page("Same title", body="<p>other</p>")},
     )
     a, b = run.entities
-    merged = a.model_copy(update={"artifact_ids": [*a.artifact_ids, *b.artifact_ids], "grouping_basis": ArtifactGroupingBasis.IDENTICAL_CONTENT_HASH})
-    with pytest.raises(ValueError, match="neither a strong"):
+    merged = a.model_copy(update={"artifact_ids": [*a.artifact_ids, *b.artifact_ids], "grouping_basis": ArtifactGroupingBasis.SHARED_STRONG_IDENTIFIER})
+    with pytest.raises(ValueError, match="do not share a strong|multi-artifact entity requires a verified strong identity"):
         ProductPriorArtRun.model_validate({**dict(run), "entities": [merged], "candidates": []})
 
 
@@ -775,7 +778,7 @@ def test_phase2h_offline_eval_passes():
 
     report = build_report([run_case(case) for case in load_cases()])
     assert not report.errored and not report.failed_cases, (report.errored, report.failed_cases, report.failures[:5])
-    assert len(report.gates) == len(GATES) == 64
+    assert len(report.gates) == len(GATES) == 68  # 64 Phase 2H + 4 Phase 2H.1
     for gate, (num, den) in report.gates.items():
         assert num == 0 and den > 0, gate
     for family in REQUIRED_QUALITY_FAMILIES:
