@@ -563,6 +563,22 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         # is persisted.
         "AlignmentClassification",
         "CandidateComponentDTO",
+        # Phase 2I novelty/differentiation eval layer: an offline measurement
+        # artifact that runs outside any evaluation and never touches a checkpoint.
+        "NoveltyGoldCase",
+        # Phase 2I model-facing DTOs. The untrusted boundary of the feature
+        # extraction and technical comparison calls: validated inside the
+        # verifier, mapped to ComparisonFeatures / CandidateDisclosureAnchors
+        # and discarded. Only the verified canonical form is persisted.
+        "EvidenceDTO",
+        "FeatureExtractionResponse",
+        "FeatureJudgmentDTO",
+        "ProposedFeatureDTO",
+        "TechnicalComparisonResponse",
+        # Phase 2I anchor-location outcome: a transient return value of the
+        # exact-text locator; the verified occurrence is persisted instead as
+        # OccurrenceResolution on the anchor.
+        "LocateFailure",
         # Phase 2D claim-evidence alignment eval layer: offline measurement
         # artifacts that run outside any evaluation and never touch a checkpoint.
         "AlignmentGoldCase",
