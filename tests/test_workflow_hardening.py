@@ -575,6 +575,21 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "FeatureJudgmentDTO",
         "ProposedFeatureDTO",
         "TechnicalComparisonResponse",
+        # Phase 2J model-facing DTOs. The untrusted boundary of the gap
+        # candidate extraction, project-linkage and counterevidence calls:
+        # validated inside the verifier in the same node, mapped to exact
+        # GapEvidenceRefs / GapLimitations / GapProjectLinks and discarded.
+        # Only the verified canonical form is persisted.
+        "CapabilityDTO",
+        "ConditionDTO",
+        "CounterEvidenceDTO",
+        "CounterEvidenceResponse",
+        "GapExtractionResponse",
+        "LimitationDTO",
+        "LinkJudgmentDTO",
+        "LinkageResponse",
+        "SpanDTO",
+        "ValidationDTO",
         # Phase 2I anchor-location outcome: a transient return value of the
         # exact-text locator; the verified occurrence is persisted instead as
         # OccurrenceResolution on the anchor.

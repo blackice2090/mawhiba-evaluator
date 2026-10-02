@@ -21,6 +21,7 @@ from src.schemas.academic import AcademicRetrievalResult
 from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
 from src.schemas.claim_evidence_score import ClaimEvidenceScoringRun
 from src.schemas.claim_sufficiency import ClaimSufficiencyRun
+from src.schemas.gap_assessment import GapAssessmentRun
 from src.schemas.novelty_differentiation import NoveltyDifferentiationRun
 from src.schemas.open_source_prior_art import OpenSourcePriorArtRun
 from src.schemas.patent import PatentPriorArtRun
@@ -404,6 +405,13 @@ class ResearchRun(MawhibaModel):
         "patentability, infringement or copying conclusion and never a score "
         "(ADR-020).",
     )
+    research_engineering_gap: GapAssessmentRun | None = Field(
+        default=None,
+        description="Phase 2J research / engineering gap assessment over the "
+        "verified artifacts of Phases 2C-2I. On the run, never ProjectState.gap: "
+        "an evidence-bounded posture, not an absence claim, not a methodology or "
+        "result judgement and never a score (ADR-021).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -495,6 +503,32 @@ class ResearchRun(MawhibaModel):
                 if bound is not None and bound != subrun_id:
                     raise ValueError(
                         f"novelty_differentiation was built over a different {label} run "
+                        "than this research run carries (section 31)"
+                    )
+        gap = self.research_engineering_gap
+        if gap is not None:
+            if gap.research_run_id != self.research_run_id:
+                raise ValueError("research_engineering_gap belongs to a different research run")
+            if gap.nd_run_id is not None and (
+                novelty is None or gap.nd_run_id != novelty.nd_run_id
+            ):
+                raise ValueError(
+                    "research_engineering_gap was built over a different Phase 2I run "
+                    "than this research run carries (section 31)"
+                )
+            carried = {
+                "PHASE_2C_EVIDENCE": self.evidence_extraction.evidence_extraction_run_id
+                if self.evidence_extraction else None,
+                "PHASE_2E_SUFFICIENCY": self.claim_sufficiency.sufficiency_run_id if self.claim_sufficiency else None,
+                "PHASE_2G_PATENT": self.patent_prior_art.patent_run_id if self.patent_prior_art else None,
+                "PHASE_2H_PRODUCT": self.product_prior_art.product_run_id if self.product_prior_art else None,
+                "PHASE_2H_OPEN_SOURCE": self.open_source_prior_art.oss_run_id if self.open_source_prior_art else None,
+                "PHASE_2I_NOVELTY_DIFFERENTIATION": novelty.nd_run_id if novelty else None,
+            }
+            for binding in gap.upstream_bindings:
+                if carried.get(binding.phase.value) != binding.upstream_run_id:
+                    raise ValueError(
+                        f"research_engineering_gap was bound to a different {binding.phase.value} run "
                         "than this research run carries (section 31)"
                     )
         return self

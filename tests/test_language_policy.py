@@ -53,6 +53,12 @@ ARABIC_AS_DATA: dict[Path, str] = {
     / "submissions.py": "synthetic Arabic student submissions",
     PROJECT_ROOT
     / "tests"
+    / "fixtures"
+    / "phase2j_sources.py": "Arabic and mixed-language source text, including instruction-like "
+                            "sentences, proving Phase 2J treats it as inert evidence data and "
+                            "that model prose in any language cannot reach a canonical record",
+    PROJECT_ROOT
+    / "tests"
     / "test_intake_trust.py": "Arabic extraction and anchor test data",
     PROJECT_ROOT / "tests" / "test_llm_layer.py": "Arabic range in a prompt-language check",
     PROJECT_ROOT

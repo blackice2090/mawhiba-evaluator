@@ -200,6 +200,14 @@ until one of the two is true — that is the intended workflow, not an obstacle.
   leaves the run non-terminal, and is **not** the `NOVELTY` verdict node
   (`NOVELTY`, `CLOSEST_PRIOR_ART`, `SCORING`, `TRUST_GATE`, `RED_TEAM` and every
   2G/2H discovery node are in its `FORBIDDEN_NODES`).
+- `build_phase2j_gap_graph()` -- research / engineering gap assessment over the
+  finished Phase 2C-2I artifacts. Three structured model calls per claim
+  (candidate extraction, project-linkage judgment, counterevidence review), each
+  verified deterministically in the node that receives it; kind, scope, corroboration
+  and posture are decided in Python. Performs no new search, takes no search
+  provider, leaves the run non-terminal, and is **not** the `GAP` node
+  (`GAP`, `METHODOLOGY`, `EXPERIMENT_REVIEW`, `NOVELTY`, `SCORING`, `TRUST_GATE`,
+  `RED_TEAM` and every discovery node are in its `FORBIDDEN_NODES`).
 - The provider is injected per run via
   `config["configurable"]["structured_model_provider"]`, which is what keeps graph
   construction credential-free and tests deterministic.
@@ -348,12 +356,13 @@ not obvious from the code.
 - `docs/phase2g_patent_prior_art_research.md` — patent provider contracts (EPO OPS, USPTO, PATENTSCOPE), query planning, publication and family identity, date semantics, cutoff qualification, snapshots, boundedness, patent evals
 - `docs/phase2h_product_oss_prior_art_research.md` — product and open-source discovery, safe fetching, product identity and anti-inflation, repository identity and networks, chronology, Gold evals; provider contracts in `docs/phase2h_github_provider_contract.md` and `docs/phase2h_product_web_provider_contract.md`
 - `docs/phase2i_novelty_differentiation.md` -- technical overlap and differentiation: feature inventory, source- and feature-sensitive disclosure capacity, exact candidate anchors, candidate independence, per-type chronology, boundedness, deterministic synthesis, Gold evals
-- `docs/adr/ADR-0{01..20}-*.md` — decisions and their rejected alternatives
+- `docs/phase2j_research_engineering_gap.md` — gap chain, existence vs project linkage, condition materiality, HYBRID rule, inherited independence, counterevidence coverage, claim postures, deferred scope
+- `docs/adr/ADR-0{01..21}-*.md` — decisions and their rejected alternatives
 
 ## Phase discipline
 
 Work has proceeded in reviewed phases (0, 1A, 1A.1, 1B, 1C, 2A, 2A.1, 2B, 2B.1,
-2B.2, 2C, 2D, 2E, 2E.1, 2F, 2G, 2H, 2H.1, 2I). Phase 2A
+2B.2, 2C, 2D, 2E, 2E.1, 2F, 2G, 2H, 2H.1, 2I, 2J). Phase 2A
 added the research foundation: `ResearchRun` on graph state (never in
 `ProjectState`), verified query planning, and official Mawhiba requirements
 retrieval (`build_phase2a_research_graph()`). Research planning must never write
@@ -558,6 +567,35 @@ Chronology statements are per candidate type and prove no historical availabilit
 or public visibility. Candidate text that reads like an instruction is inert data
 and stays admissible; model behaviour that follows it is refused, and a leaked
 system prompt is never persisted.
+
+Phase 2J added research / engineering gap assessment (ADR-021).
+`GapAssessmentRun` lives on `ResearchRun.research_engineering_gap`, never in
+`ProjectState` and never in `ProjectState.gap`. A gap is an evidence-bounded
+posture derived in Python, not an absence claim: differentiation, absence, a
+student claim, a single-source limitation and a language or implementation
+difference are each *not* a gap. Gap **existence** (`GapExistence`) and
+project-gap **linkage** (`ProjectLinkageLevel`) are separate derived values; the
+linkage relation (`ADDRESSES_LIMITATION` ... `INSUFFICIENT_LINKAGE_EVIDENCE`) is
+a `MODEL_ASSISTED_BOUNDED_JUDGMENT` whose IDs and hashes are verified but whose
+semantics are not. `SUPPORTED_WITHIN_BOUNDS` needs an anchored limitation, an
+anchored existing capability, full linkage, a validation requirement (no
+threshold field), a condition only when the limitation is condition-specific,
+and a complete counterevidence review. HYBRID needs a research and a separate
+engineering limitation, both materially linked, and a `proposition_key` unique
+per hypothesis so a relabelled copy cannot manufacture it. Independence is
+inherited from Phase 2E / 2I, never recomputed; ungrouped academic evidence and
+unresolved patent families never corroborate, and a missing Phase 2E is
+`UNRESOLVED_INDEPENDENCE`, not insufficiency. An unassessable claim is
+`INSUFFICIENT_INPUT` with its reason, never "no gap". Titles, repository
+metadata and manifests are never limitation evidence; chronology is kept in its
+own records and proves neither publicity nor legal prior art. Different-condition
+counterevidence narrows scope through a separate `CounterevidenceScopeEffect`
+(never `GapScope`) and, if it exposes an unbound material condition, ends
+`SUPPORTED_WITHIN_BOUNDS`. The canonical conclusion is the typed
+`GapBoundedStatement`; no model-written string reaches a canonical record, and
+rejections persist only a digest of model text. Phase 2F scores do
+not reach a posture. No new search; upstream subruns are fingerprinted at bind
+and re-checked at finalize.
 
 The scoring engine for the **project** (rubric axes, `ScoreRecord`,
 `ProjectState.scores`), legal novelty analysis, Red Team, report generation, the
