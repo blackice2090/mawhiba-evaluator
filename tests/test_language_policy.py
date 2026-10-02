@@ -112,6 +112,18 @@ ARABIC_AS_DATA: dict[Path, str] = {
     / "v1"
     / "cases.jsonl": "synthetic Arabic and mixed-language claims and an Arabic "
                      "injection attempt for product/open-source discovery",
+    PROJECT_ROOT
+    / "scripts"
+    / "generate_phase2i_gold.py": "one-off generator embedding the Arabic and "
+                                  "mixed-language Gold claims and candidate source "
+                                  "text it writes out",
+    PROJECT_ROOT
+    / "evals"
+    / "novelty_differentiation"
+    / "v1"
+    / "cases.jsonl": "synthetic Arabic and mixed-language claims, patent, product "
+                     "and repository source text, and an Arabic instruction-like "
+                     "phrase appearing as inert candidate data",
 }
 
 FILES_ALLOWED_TO_QUOTE_ARABIC = set(ARABIC_AS_DATA)

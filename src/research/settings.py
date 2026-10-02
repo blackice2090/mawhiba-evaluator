@@ -25,6 +25,7 @@ from src.schemas.official import (
     OfficialPageKind,
     OfficialSeed,
 )
+from src.schemas.novelty_differentiation import NoveltyComparisonBounds
 from src.schemas.research import QueryPlanLimits
 
 IBDAA_SERVICE_SEED = OfficialSeed(
@@ -279,6 +280,7 @@ class ResearchSettings(MawhibaModel):
     patent: PatentResearchSettings = Field(default_factory=PatentResearchSettings)
     product: ProductResearchSettings = Field(default_factory=ProductResearchSettings)
     open_source: OpenSourceResearchSettings = Field(default_factory=OpenSourceResearchSettings)
+    novelty: NoveltyComparisonBounds = Field(default_factory=NoveltyComparisonBounds)
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()

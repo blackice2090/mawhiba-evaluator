@@ -21,6 +21,7 @@ from src.schemas.academic import AcademicRetrievalResult
 from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
 from src.schemas.claim_evidence_score import ClaimEvidenceScoringRun
 from src.schemas.claim_sufficiency import ClaimSufficiencyRun
+from src.schemas.novelty_differentiation import NoveltyDifferentiationRun
 from src.schemas.open_source_prior_art import OpenSourcePriorArtRun
 from src.schemas.patent import PatentPriorArtRun
 from src.schemas.product_prior_art import ProductPriorArtRun
@@ -394,6 +395,15 @@ class ResearchRun(MawhibaModel):
         "provider-declared networks, ending at candidates. Never a copying, "
         "novelty or legal conclusion (ADR-019).",
     )
+    novelty_differentiation: NoveltyDifferentiationRun | None = Field(
+        default=None,
+        description="Phase 2I technical overlap and differentiation of existing "
+        "claims against the Phase 2G/2H candidates. On the run for the same "
+        "ownership reason as every phase since 2B. A descriptive evidence "
+        "posture relative to a bounded candidate set: never a legal novelty, "
+        "patentability, infringement or copying conclusion and never a score "
+        "(ADR-020).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -468,6 +478,25 @@ class ResearchRun(MawhibaModel):
         ):
             if subrun is not None and subrun.research_run_id != self.research_run_id:
                 raise ValueError(f"{label} belongs to a different research run")
+        novelty = self.novelty_differentiation
+        if novelty is not None:
+            if novelty.research_run_id != self.research_run_id:
+                raise ValueError("novelty_differentiation belongs to a different research run")
+            for label, bound, subrun_id in (
+                ("patent", novelty.patent_run_id,
+                 self.patent_prior_art.patent_run_id if self.patent_prior_art else None),
+                ("product", novelty.product_run_id,
+                 self.product_prior_art.product_run_id if self.product_prior_art else None),
+                ("open-source", novelty.oss_run_id,
+                 self.open_source_prior_art.oss_run_id if self.open_source_prior_art else None),
+                ("sufficiency", novelty.sufficiency_run_id,
+                 self.claim_sufficiency.sufficiency_run_id if self.claim_sufficiency else None),
+            ):
+                if bound is not None and bound != subrun_id:
+                    raise ValueError(
+                        f"novelty_differentiation was built over a different {label} run "
+                        "than this research run carries (section 31)"
+                    )
         return self
 
     @property
