@@ -58,6 +58,18 @@ ARABIC_AS_DATA: dict[Path, str] = {
                             "sentences, proving Phase 2J treats it as inert evidence data and "
                             "that model prose in any language cannot reach a canonical record",
     PROJECT_ROOT
+    / "scripts"
+    / "generate_phase2j_gold_core.py": "one-off generator language packs: the Arabic and mixed-language Gold "
+                                       "claims and source text (limitations, capabilities, conditions, "
+                                       "counterevidence, absence sentences and an instruction-like phrase "
+                                       "as inert evidence data) it writes out",
+    PROJECT_ROOT
+    / "evals"
+    / "research_engineering_gap"
+    / "v1"
+    / "cases.jsonl": "synthetic Arabic and mixed-language claims and patent, product and repository source "
+                     "text, including Arabic instruction-like phrases that must stay inert evidence data",
+    PROJECT_ROOT
     / "tests"
     / "test_intake_trust.py": "Arabic extraction and anchor test data",
     PROJECT_ROOT / "tests" / "test_llm_layer.py": "Arabic range in a prompt-language check",

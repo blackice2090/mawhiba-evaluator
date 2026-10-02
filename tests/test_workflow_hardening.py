@@ -575,6 +575,9 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "FeatureJudgmentDTO",
         "ProposedFeatureDTO",
         "TechnicalComparisonResponse",
+        # Phase 2J gap eval layer: an offline measurement artifact that runs outside any
+        # evaluation and never touches a checkpoint.
+        "GapGoldCase",
         # Phase 2J model-facing DTOs. The untrusted boundary of the gap
         # candidate extraction, project-linkage and counterevidence calls:
         # validated inside the verifier in the same node, mapped to exact

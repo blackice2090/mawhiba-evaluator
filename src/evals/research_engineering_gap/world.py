@@ -53,6 +53,13 @@ def _ok(task: ModelTask, parsed: Any) -> ModelCallResult:
 
 
 def _failure(task: ModelTask, kind: str) -> ModelCallResult:
+    if kind in ("refusal_leak", "error_leak"):
+        line = prompt_line()
+        if kind == "refusal_leak":
+            return ModelCallResult(status=ModelCallStatus.REFUSAL, model="fake-model", provider="fake",
+                                   task=task, refusal=line)
+        return ModelCallResult(status=ModelCallStatus.PROVIDER_ERROR, model="fake-model", provider="fake",
+                               task=task, error=line)
     if kind == "parse_error":
         return ModelCallResult(status=ModelCallStatus.PARSE_ERROR, model="fake-model", provider="fake",
                                task=task, error="parsed output failed schema validation")
@@ -61,6 +68,23 @@ def _failure(task: ModelTask, kind: str) -> ModelCallResult:
                                task=task, refusal="I cannot help with that request.")
     return ModelCallResult(status=ModelCallStatus.PROVIDER_ERROR, model="fake-model", provider="fake",
                            task=task, error="APIConnectionError: connection reset")
+
+
+def prompt_line() -> str:
+    """A line of the hidden extraction prompt, used by scripts that leak it."""
+    return next(ln.strip() for ln in GAP_CANDIDATE_EXTRACTION_PROMPT_V1.splitlines() if len(ln.strip()) >= 40)
+
+
+def _expand_leaks(value: Any) -> Any:
+    """Every script string equal to ``$LEAK`` becomes a hidden-prompt line, so a
+    script can put leaked prompt text into ANY field (label, type, metric, ...)."""
+    if value == "$LEAK":
+        return prompt_line()
+    if isinstance(value, dict):
+        return {k: _expand_leaks(v) for k, v in value.items()}
+    if isinstance(value, list):
+        return [_expand_leaks(v) for v in value]
+    return value
 
 
 _TEXT_HEADER = re.compile(r"^\[(T\d+)\] \(([A-Z_]+)\)$")
@@ -108,6 +132,9 @@ class ScriptedGapModel:
     script: dict[str, Any]
     calls: list[tuple[ModelTask, str]] = field(default_factory=list)
 
+    def __post_init__(self) -> None:
+        self.script = _expand_leaks(self.script)
+
     def provider(self) -> FakeStructuredModelProvider:
         return FakeStructuredModelProvider(factory=self)
 
@@ -124,12 +151,18 @@ class ScriptedGapModel:
     # -- helpers --------------------------------------------------------------
 
     def _span(self, texts: list[tuple[str, str, str]], spec: dict[str, Any]) -> dict[str, Any]:
+        """Point at the shown text that holds the excerpt. ``in`` narrows to a text kind (or a
+        token), ``nth_text`` picks among several holders, ``token`` forces a token (even a bad one)."""
         excerpt = spec["excerpt"]
         token = spec.get("token")
-        if token is None and "in" in spec:
-            token = next((t for t, kind, _ in texts if kind == spec["in"] or t == spec["in"]), "T99")
         if token is None:
-            token = next((t for t, _, text in texts if excerpt in text), texts[0][0] if texts else "T99")
+            pool = [t for t in texts if "in" not in spec or t[1] == spec["in"] or t[0] == spec["in"]]
+            holders = [t[0] for t in pool if excerpt in t[2]]
+            nth = spec.get("nth_text", 1)
+            if len(holders) >= nth:
+                token = holders[nth - 1]
+            else:
+                token = pool[0][0] if pool else (texts[0][0] if texts else "T99")
         return {"text": token, "excerpt": excerpt, "start": spec.get("start"), "end": spec.get("end"),
                 "occurrence": spec.get("occurrence"), "rationale": self._rationale(spec)}
 
@@ -185,7 +218,9 @@ class ScriptedGapModel:
         for spec in specs:
             feature = next((t for t, _, text in features if text == spec["feature"] or t == spec["feature"]), "F99")
             limitation = next(
-                (t for t, _, text in limitations if t == spec["limitation"] or spec["limitation"] in text), "L99")
+                (t for t, kind, text in limitations
+                 if (t == spec["limitation"] or spec["limitation"] in text) and spec.get("limitation_type", kind) == kind),
+                "L99")
             judgments.append(LinkJudgmentDTO(feature=feature, limitation=limitation, relation=spec["relation"],
                                              rationale=self._rationale(spec)))
         return _ok(task, LinkageResponse(judgments=judgments))
@@ -218,9 +253,19 @@ def build_phase2i_world(
     case_id: str, claims: list[dict[str, str]], *, patent: dict[str, Any] | None = None,
     product: dict[str, Any] | None = None, oss: dict[str, Any] | None = None,
     cutoff: dict[str, str] | None = None, nd_script: dict[str, Any] | None = None,
+    drop_sufficiency: bool = False,
 ) -> EvaluationGraphState:
-    """Real 2E -> 2F -> 2G -> 2H -> 2I graphs; the result carries a finished Phase 2I run."""
+    """Real 2E -> 2F -> 2G -> 2H -> 2I graphs; the result carries a finished Phase 2I run.
+
+    ``drop_sufficiency`` strips Phase 2E/2F BEFORE Phase 2I runs, so Phase 2I is
+    genuinely built without them (Phase 2E independence absent)."""
+    from src.schemas.research import ResearchRun
+
     before = build_upstream(case_id, claims, patent=patent, product=product, oss=oss, cutoff=cutoff)
+    if drop_sufficiency:
+        run = before.active_research_run
+        stripped = ResearchRun.model_validate({**dict(run), "claim_sufficiency": None, "claim_evidence_scoring": None})
+        before = before.model_copy(update={"research_runs": {str(run.research_run_id): stripped}})
     model = ScriptedNoveltyModel({c["claim_id"]: c["claim"] for c in claims}, nd_script or {})
     return run_phase2i(before, model.provider())
 
@@ -250,6 +295,7 @@ def run_phase2j(
 __all__ = [
     "ScriptedGapModel",
     "build_phase2i_world",
+    "prompt_line",
     "parse_items",
     "parse_texts",
     "run_phase2j",
