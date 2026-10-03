@@ -25,6 +25,7 @@ from src.schemas.official import (
     OfficialPageKind,
     OfficialSeed,
 )
+from src.schemas.gap_assessment import GapAssessmentBounds
 from src.schemas.novelty_differentiation import NoveltyComparisonBounds
 from src.schemas.research import QueryPlanLimits
 
@@ -281,6 +282,7 @@ class ResearchSettings(MawhibaModel):
     product: ProductResearchSettings = Field(default_factory=ProductResearchSettings)
     open_source: OpenSourceResearchSettings = Field(default_factory=OpenSourceResearchSettings)
     novelty: NoveltyComparisonBounds = Field(default_factory=NoveltyComparisonBounds)
+    gap: GapAssessmentBounds = Field(default_factory=GapAssessmentBounds)
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()
