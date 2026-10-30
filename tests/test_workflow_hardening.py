@@ -438,6 +438,9 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "ScoreAxisName",
         "ScoringInput",
         "TrustPolicy",
+        # Phase 3A requirement catalog row: import-time policy (REQUIREMENT_CATALOG);
+        # a run persists the resolved RequirementApplicability, never the row.
+        "CatalogEntry",
         # Workflow-layer input contracts: validated and discarded at the
         # boundary; only their effect on ProjectState is persisted.
         "ProjectPatch",
