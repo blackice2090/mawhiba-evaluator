@@ -54,6 +54,13 @@ ARABIC_AS_DATA: dict[Path, str] = {
     PROJECT_ROOT
     / "tests"
     / "fixtures"
+    / "phase3a_submissions.py": "Arabic and mixed-language student methodology sentences, including "
+                                "instruction-like ones, proving Phase 3A treats source text in any "
+                                "language as inert exact-excerpt data and that safety rests on the "
+                                "typed contract, not on recognising words",
+    PROJECT_ROOT
+    / "tests"
+    / "fixtures"
     / "phase2j_sources.py": "Arabic and mixed-language source text, including instruction-like "
                             "sentences, proving Phase 2J treats it as inert evidence data and "
                             "that model prose in any language cannot reach a canonical record",

@@ -837,7 +837,6 @@ class MethodologyIssueCode(StrEnum):
     DUPLICATE_OR_GROUP_LEAKAGE_RISK = "DUPLICATE_OR_GROUP_LEAKAGE_RISK"
     REPRODUCIBILITY_NOT_DOCUMENTED = "REPRODUCIBILITY_NOT_DOCUMENTED"
     CONFLICTING_METHOD_DESCRIPTION = "CONFLICTING_METHOD_DESCRIPTION"
-    STUDENT_EXECUTION_CLAIM_NOT_VERIFIED = "STUDENT_EXECUTION_CLAIM_NOT_VERIFIED"
 
 
 ISSUE_SEVERITY: dict[MethodologyIssueCode, Severity] = {
@@ -858,7 +857,6 @@ ISSUE_SEVERITY: dict[MethodologyIssueCode, Severity] = {
     MethodologyIssueCode.DUPLICATE_OR_GROUP_LEAKAGE_RISK: Severity.HIGH,
     MethodologyIssueCode.REPRODUCIBILITY_NOT_DOCUMENTED: Severity.LOW,
     MethodologyIssueCode.CONFLICTING_METHOD_DESCRIPTION: Severity.HIGH,
-    MethodologyIssueCode.STUDENT_EXECUTION_CLAIM_NOT_VERIFIED: Severity.LOW,
 }
 """Severity is a function of the issue class alone, never of model prose."""
 
@@ -937,6 +935,15 @@ def derive_track_posture(
     )
 
 
+def cap_for_unresolved_overlay(posture: MethodologyPosture, overlay_blocked: bool) -> MethodologyPosture:
+    """An overlay whose materiality or HYBRID ownership is unresolved has no owner track, so none of its
+    requirements sits in a track's applicability list for ``derive_track_posture`` to see. This is the one
+    place that rule is applied: such a track is never better than PARTIALLY_SPECIFIED."""
+    if overlay_blocked and posture is MethodologyPosture.METHODOLOGY_WELL_SPECIFIED_WITHIN_BOUND_INPUT:
+        return MethodologyPosture.METHODOLOGY_PARTIALLY_SPECIFIED
+    return posture
+
+
 class MethodologyTrackAssessment(MawhibaModel):
     """One track's posture. ``posture`` must equal ``derive_track_posture`` over the
     records it names; ``model_proposed_posture`` is recorded and never trusted."""
@@ -950,6 +957,12 @@ class MethodologyTrackAssessment(MawhibaModel):
     conditions: list[MaterialConditionCoverage] = Field(default_factory=list)
     issues: list[MethodologyIssue] = Field(default_factory=list)
     model_proposed_posture: MethodologyPosture | None = Field(default=None, description="Recorded, never trusted.")
+    overlay_blocked: bool = Field(
+        default=False,
+        description="True while any overlay's materiality or HYBRID ownership is unresolved. Such an overlay "
+        "has no owner track, so none of its requirements sits in a track's applicability list; this flag is how "
+        "the unresolved requirement still blocks a well-specified posture in every track.",
+    )
     posture: MethodologyPosture
     execution_verified: Literal[False] = False
     confounding_eliminated: Literal[False] = False
@@ -964,13 +977,16 @@ class MethodologyTrackAssessment(MawhibaModel):
         required = {a.kind for a in self.applicability if a.applicability is not Applicability.NOT_APPLICABLE}
         if not {d.kind for d in self.documentation} <= required:
             raise ValueError("documentation is recorded only for an applicable requirement")
-        derived = derive_track_posture(
-            inputs_bound=self.inputs_bound,
-            applicability=self.applicability,
-            documentation=self.documentation,
-            coverage=self.coverage,
-            conditions=self.conditions,
-            issues=self.issues,
+        derived = cap_for_unresolved_overlay(
+            derive_track_posture(
+                inputs_bound=self.inputs_bound,
+                applicability=self.applicability,
+                documentation=self.documentation,
+                coverage=self.coverage,
+                conditions=self.conditions,
+                issues=self.issues,
+            ),
+            self.overlay_blocked,
         )
         if self.posture is not derived:
             raise ValueError(f"posture must be derived in code ({derived.value}), never chosen")
@@ -1187,6 +1203,7 @@ class MethodologyRunIssueCode(StrEnum):
     PROMPT_LEAK_REDACTED = "PROMPT_LEAK_REDACTED"
     MODEL_ERROR = "MODEL_ERROR"
     MODEL_PROVIDER_MISSING = "MODEL_PROVIDER_MISSING"
+    MODEL_CALL_BOUND_REACHED = "MODEL_CALL_BOUND_REACHED"
 
 
 class MethodologyRunIssue(MawhibaModel):
@@ -1214,6 +1231,44 @@ class MethodologyRunVersions(MawhibaModel):
     model_name: str | None = None
 
 
+class MethodologyReviewBounds(MawhibaModel):
+    """Every dimension of a run is bounded; a bounded run never reads complete."""
+
+    max_submission_chars: int = Field(default=60_000, ge=1_000, le=400_000)
+    max_excerpt_chars: int = Field(default=1_500, ge=50, le=10_000)
+    max_excerpts: int = Field(default=300, ge=1, le=2_000)
+    max_model_calls: int = Field(default=80, ge=0, le=2_000)
+    model_retry_limit: int = Field(default=1, ge=0, le=5)
+
+
+class MethodologyDraft(MawhibaModel):
+    """Verified records carried between stages until synthesis builds the track
+    assessments. Everything here already passed deterministic verification; no
+    model text, rationale or unverified proposal is stored. The draft is a
+    working ledger, not a result: it holds no posture and no issue."""
+
+    methodology_run_id: UUID
+    applicability: list[RequirementApplicability] = Field(default_factory=list)
+    documentation: list[RequirementDocumentation] = Field(default_factory=list)
+    coverage: list[MethodologyCoverageLink] = Field(default_factory=list)
+    conditions: list[MaterialConditionCoverage] = Field(default_factory=list)
+    unjudged_targets: list[str] = Field(
+        default_factory=list,
+        description="Claim ids and Phase 2J hypothesis ids a required model judgment could not be obtained for. "
+        "Such a target gets an INSUFFICIENT_LINKAGE_EVIDENCE link, never a positive or a negative finding.",
+    )
+    source_truncated: bool = Field(
+        default=False, description="The submission exceeded the bound shown to the model: absence proves nothing."
+    )
+    source_unread: bool = Field(
+        default=False,
+        description="No model read the submission (no provider, or the call failed): nothing is documented "
+        "and nothing is undocumented -- every requirement is INSUFFICIENT_SOURCE_COVERAGE.",
+    )
+    model_calls_succeeded: int = Field(default=0, ge=0)
+    model_calls_failed: int = Field(default=0, ge=0)
+
+
 class MethodologyReviewRun(MawhibaModel):
     methodology_run_id: UUID
     research_run_id: UUID
@@ -1227,6 +1282,7 @@ class MethodologyReviewRun(MawhibaModel):
     submission_artifact_id: UUID | None = None
     submission_content_hash: str | None = Field(default=None, pattern=CONTENT_HASH_PATTERN)
     upstream_bindings: list[MethodologyUpstreamBinding] = Field(default_factory=list)
+    draft: MethodologyDraft | None = None
     bound_claims: list[BoundClaim] = Field(default_factory=list)
     bound_gap_targets: list[BoundGapTarget] = Field(default_factory=list)
     excerpts: list[StudentMethodologyExcerpt] = Field(default_factory=list)
@@ -1262,6 +1318,9 @@ class MethodologyReviewRun(MawhibaModel):
         children = [*self.excerpts, *self.baselines, *self.metric_alignments, *self.track_assessments, *self.overlays]
         for ta in self.track_assessments:
             children += [*ta.applicability, *ta.documentation, *ta.coverage, *ta.conditions, *ta.issues]
+        if self.draft is not None:
+            children += [self.draft, *self.draft.applicability, *self.draft.documentation, *self.draft.coverage,
+                         *self.draft.conditions]
         if any(c.methodology_run_id != own for c in children):
             raise ValueError("a record belongs to a different methodology run (cross-run mixing)")
         excerpts = {e.excerpt_id: e for e in self.excerpts}

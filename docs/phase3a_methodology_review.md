@@ -1,10 +1,11 @@
 # Phase 3A — Methodology Review (architecture)
 
-Status: the architecture gate is complete. Contracts and contract tests exist. The
-pipeline, graph, prompts and Gold/eval do not exist yet.
+Status: the architecture gate and the production pipeline are complete (section 13).
+Gold/eval does not exist yet.
 Specification: `PHASE_3A_METHODOLOGY_REVIEW.md`. Decision record: ADR-022.
 Contracts: `src/schemas/methodology_review.py`.
-Tests: `tests/test_phase3a_contracts.py`.
+Tests: `tests/test_phase3a_contracts.py`, `tests/test_phase3a_architecture_hardening.py`,
+`tests/test_phase3a_binding_anchoring.py`, `_overlays.py`, `_assessment.py`, `_safety_replay.py`.
 
 ## 1. Question and boundary
 
@@ -128,7 +129,8 @@ always CONFLICTING_DESIGN. Excerpt counts are enforced:
 
 - **Execution claims.** `StatementMode` is PLANNED, DESCRIBED_AS_EXECUTED or
   MODE_NOT_DETERMINED. `execution_verified` is a literal `False`.
-  `STUDENT_EXECUTION_CLAIM_NOT_VERIFIED` is an informational issue.
+  A past-tense sentence is not a methodology defect: the boundary is the excerpt's statement mode plus the
+  literal `False`, and the issue taxonomy has no execution-verification code (Phase 3B owns that).
 - **Baseline (hardened).** There are four layers, never collapsed:
   1. **Documented.** `baseline_excerpt_ids` holds exact student spans.
   2. **Relevant to the target.** `relevance` is a bounded judgment. Its
@@ -276,3 +278,70 @@ severity of each issue code.
 - Model-judgment families (coverage relation, conditional applicability, metric
   alignment, baseline relevance) are reported honestly and are not required to be
   perfect.
+
+## 13. Production implementation (pre-Gold)
+
+`build_phase3a_methodology_graph()` (`src/graph/phase3a_graph.py`) runs ten nodes over an open
+research run that carries a finished Phase 2J run, the claims and the verbatim submission. It
+leaves the research run non-terminal and has no human interrupt. Stage logic lives in
+`src/research/methodology/`; each stage is idempotent through `stage_markers`.
+
+| Node | Stage | Model |
+|---|---|---|
+| LOAD_METHODOLOGY_REVIEW_RUN | bind inputs, fingerprint them | no |
+| BUILD_METHODOLOGY_REQUIREMENT_INVENTORY | closed catalog, deterministic Phase 2J triggers | no |
+| RESOLVE_METHODOLOGY_OVERLAYS | AI/ML and software materiality, ownership | 1 call, always (both overlays reviewed) |
+| EXTRACT_METHODOLOGY_EVIDENCE | exact excerpts per applicable kind | 1 call |
+| RESOLVE_METHODOLOGY_APPLICABILITY | CONDITIONAL kinds, closed trigger sets | 1 call, only if some remain |
+| ASSESS_METHODOLOGY_COMPONENTS | documentation status completed | no |
+| LINK_METHODOLOGY_TO_TARGETS | metric/baseline plan, coverage, conditions | 2 calls per claim |
+| EVALUATE_VALIDATION_CONTINUITY | strong coverage gated on the exact Phase 2J requirement | no |
+| SYNTHESIZE_METHODOLOGY_POSTURE | issues and track postures | no |
+| FINALIZE_METHODOLOGY_REVIEW | fingerprints re-checked | no |
+
+Decisions the implementation made inside the approved architecture:
+
+- **Verified working ledger.** `MethodologyReviewRun.draft` (`MethodologyDraft`) carries the
+  verified applicability, documentation, coverage and condition records between stages, because the
+  track assessments (which validate their posture) cannot exist until synthesis. It holds no
+  posture, no issue, no model text and no DTO.
+- **Unresolved overlay cap.** An unowned overlay has no track, so its CONDITIONAL requirements are in no
+  track's `applicability` and `derive_track_posture` cannot see them. `cap_for_unresolved_overlay`
+  (applied once, in `MethodologyTrackAssessment`) keeps every track at most PARTIALLY_SPECIFIED while
+  `overlay_blocked`. `derive_track_posture`'s signature is unchanged (a contract test pins it).
+- **Unjudged targets.** A target whose required model judgment could not be obtained (no provider,
+  refusal, omission, off-contract answer) gets an INSUFFICIENT_LINKAGE_EVIDENCE link and is listed in
+  `draft.unjudged_targets`. It yields no positive and no negative finding. An unreadable submission
+  (`draft.source_unread`) or one longer than the shown bound (`source_truncated`) yields
+  INSUFFICIENT_SOURCE_COVERAGE, never NOT_DOCUMENTED.
+- **Downgrade, not rejection.** A DIRECTLY_TESTS_TARGET judgment that fails a structural gate (no
+  `tests_target` kind, no aligned metric, Phase 2J continuity unmet) is stored as PARTIALLY_TESTS_TARGET.
+- **Overlay ownership.** A single-track project owns its overlays by its track; HYBRID uses the Phase 2J
+  facet when every served hypothesis has facets mapping to one track, otherwise a bounded judgment with a
+  bound excerpt, otherwise UNRESOLVED. A tool-only verdict also needs an exact excerpt, so an AI project
+  cannot escape review by a bare assertion.
+- **Bare quantities.** A rationale kind whose excerpts are all bare quantities is not documented; on any
+  other kind a bare quantity can never be rated ADEQUATELY_SPECIFIED.
+- **No data path from results.** `ProjectState.results` and `.experiments` are not read by any module
+  (a test scans the attribute accesses), so a reported result cannot repair a design.
+
+Pre-Gold hardening:
+
+- **Overlay discovery is complete by construction.** Both overlays are reviewed for every project in one bounded
+  materiality call, so no metadata tag and no finite lexicon can exclude one. Signals (intake metadata, a bounded
+  English term in the claims, submission or Phase 2J metric/baseline text) only decide what a *non-material* verdict
+  needs: an overlay with no signal may be closed by an explicit typed `NO_METHODOLOGY_RELEVANCE` verdict (stored as a
+  non-material assignment with no excerpt and no prose); a signaled overlay needs an exact-excerpt
+  `IMPLEMENTATION_TOOL_ONLY` verdict, and otherwise stays UNRESOLVED. Omission, refusal, error or an exhausted call bound
+  also leave it UNRESOLVED, which caps every track below a well-specified posture. A keyword is never materiality;
+  MATERIAL_TO_TARGET still needs a bound claim or Phase 2J hypothesis and a verified excerpt.
+- **`STUDENT_EXECUTION_CLAIM_NOT_VERIFIED` was removed** from the issue taxonomy: it had no valid emission
+  condition, and `derive_track_posture` treats every issue as a blocker.
+- **Failure reasons are distinct:** `MODEL_PROVIDER_MISSING` (no provider) and `MODEL_CALL_BOUND_REACHED`
+  (run-wide call bound exhausted) are separate run issue codes; neither carries provider text.
+
+Known limitations: a `NO_METHODOLOGY_RELEVANCE` verdict on an unsignaled overlay is a bounded model judgment (typed,
+recorded, auditable, but not independently verified); a signaled overlay the model deems irrelevant stays UNRESOLVED
+until it gives an excerpt-backed tool-only verdict (conservative); model-judgment quality (linkage, applicability,
+baseline relevance, metric alignment) is bounded and unverified by construction and is measured only by the later
+Gold milestone.

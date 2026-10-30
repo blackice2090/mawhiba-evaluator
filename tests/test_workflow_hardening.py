@@ -596,6 +596,28 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "LinkageResponse",
         "SpanDTO",
         "ValidationDTO",
+        # Phase 3A model-facing DTOs: the untrusted overlay, evidence, applicability,
+        # metric/baseline and linkage responses are verified inside the stage that
+        # receives them and mapped to exact StudentMethodologyExcerpts, typed enum
+        # judgments and deterministic ids, then discarded. Only the verified canonical
+        # form reaches a checkpoint; no DTO field (prose, rationale, offsets) is stored.
+        "ApplicabilityJudgmentDTO",
+        "ApplicabilityResponse",
+        "BaselineJudgmentDTO",
+        "ConditionJudgmentDTO",
+        "CoverageJudgmentDTO",
+        "EvidenceExtractionResponse",
+        "ExcerptDTO",
+        "MetricBaselineResponse",
+        "MetricJudgmentDTO",
+        "OverlayAssessmentResponse",
+        "OverlayJudgmentDTO",
+        "RequirementEvidenceDTO",
+        "SubmissionSpanDTO",
+        "TargetLinkageResponse",
+        # Phase 3A run bounds: configuration read per run from ResearchSettings.methodology,
+        # like GapAssessmentBounds; never part of the persisted run.
+        "MethodologyReviewBounds",
         # Phase 2I anchor-location outcome: a transient return value of the
         # exact-text locator; the verified occurrence is persisted instead as
         # OccurrenceResolution on the anchor.

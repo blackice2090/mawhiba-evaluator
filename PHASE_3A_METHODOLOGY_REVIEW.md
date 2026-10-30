@@ -484,7 +484,10 @@ Support typed issues such as:
 - `DUPLICATE_OR_GROUP_LEAKAGE_RISK`
 - `REPRODUCIBILITY_NOT_DOCUMENTED`
 - `CONFLICTING_METHOD_DESCRIPTION`
-- `STUDENT_EXECUTION_CLAIM_NOT_VERIFIED`
+
+There is no issue kind for student-described execution: student-described execution != verified execution, and that
+boundary is carried by the excerpt's statement mode and the literal `execution_verified=False` (Phase 3B verifies
+execution), never by a methodology defect.
 
 Severity, if present, should be deterministic from issue class/criticality, not model prose.
 
