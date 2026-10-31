@@ -22,6 +22,7 @@ from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
 from src.schemas.claim_evidence_score import ClaimEvidenceScoringRun
 from src.schemas.claim_sufficiency import ClaimSufficiencyRun
 from src.schemas.gap_assessment import GapAssessmentRun
+from src.schemas.experiment_review import ExperimentReviewRun
 from src.schemas.methodology_review import MethodologyReviewRun
 from src.schemas.novelty_differentiation import NoveltyDifferentiationRun
 from src.schemas.open_source_prior_art import OpenSourcePriorArtRun
@@ -420,6 +421,13 @@ class ResearchRun(MawhibaModel):
         "a design-level posture per inherited track, never execution, result, "
         "readiness or score (ADR-022).",
     )
+    experiment_review: ExperimentReviewRun | None = Field(
+        default=None,
+        description="Phase 3B experiment review over the verbatim submission, the bound "
+        "claims, the Phase 2J validation requirements and the Phase 3A context. On the run, "
+        "never ProjectState.experiments: a protocol-level posture per experiment and track, "
+        "never verified execution, result, readiness or score (ADR-023).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -547,6 +555,16 @@ class ResearchRun(MawhibaModel):
                 raise ValueError("methodology_review was built over a different Phase 2J run than this research run carries")
             if review.nd_run_id is not None and (novelty is None or review.nd_run_id != novelty.nd_run_id):
                 raise ValueError("methodology_review was built over a different Phase 2I run than this research run carries")
+        experiments = self.experiment_review
+        if experiments is not None:
+            if experiments.research_run_id != self.research_run_id:
+                raise ValueError("experiment_review belongs to a different research run")
+            if experiments.gap_run_id is not None and (gap is None or experiments.gap_run_id != gap.gap_run_id):
+                raise ValueError("experiment_review was built over a different Phase 2J run than this research run carries")
+            if experiments.methodology_run_id is not None and (
+                review is None or experiments.methodology_run_id != review.methodology_run_id
+            ):
+                raise ValueError("experiment_review was built over a different Phase 3A run than this research run carries")
         return self
 
     @property

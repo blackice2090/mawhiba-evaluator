@@ -441,6 +441,15 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         # Phase 3A requirement catalog row: import-time policy (REQUIREMENT_CATALOG);
         # a run persists the resolved RequirementApplicability, never the row.
         "CatalogEntry",
+        # Phase 3B requirement catalog row: import-time policy (EXPERIMENT_CATALOG);
+        # a run persists the resolved ExperimentRequirement, never the row.
+        "ExperimentCatalogEntry",
+        # Phase 3B catalog/policy enums: they key import-time tables (EXPERIMENT_CATALOG,
+        # FAIRNESS_REQUIRED_BY_FAMILY) or are a derived return value
+        # (ExperimentBaselineRecord.rollup); no checkpointed field holds them.
+        "ExperimentFamily",
+        "RequirementGroup",
+        "ComparabilityRollup",
         # Workflow-layer input contracts: validated and discarded at the
         # boundary; only their effect on ProjectState is persisted.
         "ProjectPatch",
