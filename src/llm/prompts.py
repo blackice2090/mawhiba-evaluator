@@ -815,7 +815,9 @@ IMPLEMENTATION_TOOL_ONLY  -- the technology is only how the project is built;
 MATERIALITY_UNRESOLVED    -- the text is too thin to tell.
 NO_METHODOLOGY_RELEVANCE  -- nothing in the submission or the claims uses this
                              overlay's technology in any role. Say this only when
-                             the text is silent about it, however it is worded.
+                             the text is silent about it, however it is worded. List
+                             EVERY claim label and EVERY hypothesis label shown
+                             as reviewed (the complete set, never a subset).
 
 RETURN, per overlay: materiality; the claim labels and hypothesis labels it is
 material to; one or more exact submission excerpts that show it (copied
@@ -826,7 +828,7 @@ and, only for a project with two tracks, which track the overlay serves
 RULES
 1. A domain word, the word "AI", or the mention of a model is NOT materiality.
 2. MATERIAL_TO_TARGET and IMPLEMENTATION_TOOL_ONLY both need an exact excerpt.
-   Answer every overlay asked about; NO_METHODOLOGY_RELEVANCE needs none.
+   Answer every overlay asked about; NO_METHODOLOGY_RELEVANCE needs none, but must list all labels.
 3. Use only the labels shown. Do not invent targets.
 4. rationale is optional, one short neutral sentence, never persisted.
 

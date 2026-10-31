@@ -56,7 +56,7 @@ def assignment(run, overlay_kind=AI):
 
 
 def test_a_domain_word_alone_is_not_materiality_or_ownership():
-    run = go(world(domains=ML, text=TEXT), {})  # a provider that answers nothing
+    run = go(world(domains=ML, text=TEXT), {"overlay_omit": True})  # a provider that answers nothing
     o = assignment(run)
     assert o.materiality is OverlayMateriality.MATERIALITY_UNRESOLVED and o.owner_track is None
     assert o.signal_domains == list(ML) and o.blocks_well_specified

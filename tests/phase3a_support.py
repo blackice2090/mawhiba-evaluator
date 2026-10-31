@@ -165,7 +165,10 @@ class ScriptedMethodologyModel:
             return bad
         if not self.script.get("overlay_omit"):  # a well-behaved model answers every overlay it is asked about
             asked = re.findall(r"^OVERLAY: ([A-Z_]+)$", user_input, flags=re.M)
-            spec = {**{name: {"materiality": "NO_METHODOLOGY_RELEVANCE"} for name in asked}, **spec}
+            claims = re.findall(r"^\[(C\d+)\] ", user_input, flags=re.M)
+            hyps = re.findall(r"^\[(H\d+)\] ", user_input, flags=re.M)
+            spec = {**{name: {"materiality": "NO_METHODOLOGY_RELEVANCE", "claims": claims, "hypotheses": hyps}
+                       for name in asked}, **spec}
         return ok(task, OverlayAssessmentResponse(overlays=[
             OverlayJudgmentDTO(
                 overlay=name, materiality=s["materiality"], claims=s.get("claims", []),

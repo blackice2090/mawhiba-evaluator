@@ -137,6 +137,7 @@ def _document(kind: RequirementKind, applicability: RequirementApplicability, dt
         if len(kept) != len(ids):
             ledger.reject(MethodologyRunIssueCode.INVALID_INPUT, kind.value)
         ids = kept
+    ids = sorted(dict.fromkeys(ids), key=lambda i: (ledger.excerpts[i].start, ledger.excerpts[i].end))  # a set: model order is not canonical
     if documentation is DocumentationStatus.CONFLICTING_DOCUMENTATION and len(ids) < 2:
         documentation = DocumentationStatus.PARTIALLY_DOCUMENTED  # one side is all the bound input shows
     if not ids:

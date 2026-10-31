@@ -242,6 +242,7 @@ def _baseline(run, gap, ct: ClaimTargets, target: BoundGapTarget | None, dto, le
             context.append(parsed)  # a rationale context is added below, only if its excerpt is bound
     if rationale_id is not None:
         context.append(BaselineRelevanceContext.STUDENT_RATIONALE_EXCERPT)
+    context.sort(key=lambda c: c.value)  # a set: model order is not canonical
     if relevance is BaselineRelevance.RELEVANT_TO_TARGET_WITHIN_BOUND_CONTEXT and not context:
         relevance = BaselineRelevance.RELEVANCE_UNRESOLVED  # the baseline's name alone is never relevance
     return BaselineComparatorRecord(
@@ -411,6 +412,7 @@ def _verified_link(run, ct, target, track, dto, documentation, excerpt_labels, l
             ledger.reject(MethodologyRunIssueCode.OFF_CONTRACT_OUTPUT, raw, off_contract=True)
         elif any(excerpt_id in d.excerpt_ids for d in usable):
             chosen.append(excerpt_id)  # an excerpt that documents nothing this track may cite is dropped
+    chosen.sort(key=lambda i: (ledger.excerpts[i].start, ledger.excerpts[i].end))  # a set: model order is not canonical
     kinds = sorted({d.kind for d in usable if any(i in d.excerpt_ids for i in chosen)}, key=lambda k: k.value)
     if relation in _TESTING and not chosen:
         relation = CoverageRelation.INSUFFICIENT_LINKAGE_EVIDENCE
@@ -435,6 +437,7 @@ def _condition(run, target: BoundGapTarget, condition_id: UUID, dto, excerpt_lab
             ids.append(excerpt_labels[raw])
         else:
             ledger.reject(MethodologyRunIssueCode.OFF_CONTRACT_OUTPUT, raw, off_contract=True)
+    ids.sort(key=lambda i: (ledger.excerpts[i].start, ledger.excerpts[i].end))  # a set: model order is not canonical
     if status is not ConditionCoverageStatus.NOT_ADDRESSED_IN_BOUND_INPUT and not ids:
         status = ConditionCoverageStatus.NOT_ADDRESSED_IN_BOUND_INPUT  # "addressed" needs an exact excerpt
     if status is ConditionCoverageStatus.NOT_ADDRESSED_IN_BOUND_INPUT:

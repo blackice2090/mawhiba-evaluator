@@ -114,10 +114,13 @@ def _judge(run, overlay, domains, dto: OverlayJudgmentDTO, ledger: StageLedger, 
     if ledger.unsafe(NODE, *(s.rationale for s in dto.excerpts)):
         return unresolved
     if dto.materiality.strip().upper() == NO_RELEVANCE:
-        # The explicit negative contract. It is accepted only when nothing in the bounded inputs hints at the overlay;
-        # it is stored as a non-material assignment with no excerpt and no prose, so the review stays auditable. A hinted
-        # overlay needs an exact-excerpt IMPLEMENTATION_TOOL_ONLY verdict instead, and otherwise stays UNRESOLVED.
-        if signaled:
+        # The explicit negative contract, identical in every language and with or without metadata: the verdict must
+        # name EVERY bound claim and EVERY bound Phase 2J hypothesis it reviewed (complete bounded review). A missing,
+        # unknown or foreign label leaves the overlay UNRESOLVED. It is stored as a non-material assignment with no
+        # excerpt and no prose. ``signaled`` is a diagnostic only and never changes this acceptance rule.
+        reviewed_claims = {l.strip().upper() for l in dto.claims}
+        reviewed_hyps = {l.strip().upper() for l in dto.hypotheses}
+        if reviewed_claims != set(c_labels) or reviewed_hyps != set(h_labels):
             ledger.reject(MethodologyRunIssueCode.INVALID_INPUT, NO_RELEVANCE)
             return unresolved
         return OverlayAssignment(
@@ -140,7 +143,8 @@ def _judge(run, overlay, domains, dto: OverlayJudgmentDTO, ledger: StageLedger, 
             hypothesis_ids.append(h_labels[label])
         else:
             ledger.reject(MethodologyRunIssueCode.OFF_CONTRACT_OUTPUT, label, off_contract=True)
-    excerpt_ids = list(dict.fromkeys(i for i in (ledger.anchor(s) for s in dto.excerpts) if i is not None))
+    excerpt_ids = sorted(dict.fromkeys(i for i in (ledger.anchor(s) for s in dto.excerpts) if i is not None),
+                         key=lambda i: (ledger.excerpts[i].start, ledger.excerpts[i].end))  # a set: model order is not canonical
     if not excerpt_ids:
         return unresolved  # materiality and a tool-only verdict both need exact source evidence
     if materiality is OverlayMateriality.IMPLEMENTATION_TOOL_ONLY:
