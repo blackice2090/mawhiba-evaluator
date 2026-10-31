@@ -438,6 +438,9 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "ScoreAxisName",
         "ScoringInput",
         "TrustPolicy",
+        # Phase 3A requirement catalog row: import-time policy (REQUIREMENT_CATALOG);
+        # a run persists the resolved RequirementApplicability, never the row.
+        "CatalogEntry",
         # Workflow-layer input contracts: validated and discarded at the
         # boundary; only their effect on ProjectState is persisted.
         "ProjectPatch",
@@ -578,6 +581,8 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         # Phase 2J gap eval layer: an offline measurement artifact that runs outside any
         # evaluation and never touches a checkpoint.
         "GapGoldCase",
+        # Phase 3A Gold eval layer: an offline measurement artifact that never touches a checkpoint.
+        "MethodGoldCase",
         # Phase 2J model-facing DTOs. The untrusted boundary of the gap
         # candidate extraction, project-linkage and counterevidence calls:
         # validated inside the verifier in the same node, mapped to exact
@@ -593,6 +598,28 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "LinkageResponse",
         "SpanDTO",
         "ValidationDTO",
+        # Phase 3A model-facing DTOs: the untrusted overlay, evidence, applicability,
+        # metric/baseline and linkage responses are verified inside the stage that
+        # receives them and mapped to exact StudentMethodologyExcerpts, typed enum
+        # judgments and deterministic ids, then discarded. Only the verified canonical
+        # form reaches a checkpoint; no DTO field (prose, rationale, offsets) is stored.
+        "ApplicabilityJudgmentDTO",
+        "ApplicabilityResponse",
+        "BaselineJudgmentDTO",
+        "ConditionJudgmentDTO",
+        "CoverageJudgmentDTO",
+        "EvidenceExtractionResponse",
+        "ExcerptDTO",
+        "MetricBaselineResponse",
+        "MetricJudgmentDTO",
+        "OverlayAssessmentResponse",
+        "OverlayJudgmentDTO",
+        "RequirementEvidenceDTO",
+        "SubmissionSpanDTO",
+        "TargetLinkageResponse",
+        # Phase 3A run bounds: configuration read per run from ResearchSettings.methodology,
+        # like GapAssessmentBounds; never part of the persisted run.
+        "MethodologyReviewBounds",
         # Phase 2I anchor-location outcome: a transient return value of the
         # exact-text locator; the verified occurrence is persisted instead as
         # OccurrenceResolution on the anchor.

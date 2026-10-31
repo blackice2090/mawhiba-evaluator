@@ -211,6 +211,13 @@ until one of the two is true — that is the intended workflow, not an obstacle.
   provider, leaves the run non-terminal, and is **not** the `GAP` node
   (`GAP`, `METHODOLOGY`, `EXPERIMENT_REVIEW`, `NOVELTY`, `SCORING`, `TRUST_GATE`,
   `RED_TEAM` and every discovery node are in its `FORBIDDEN_NODES`).
+- `build_phase3a_methodology_graph()` -- Phase 3A methodology review: the *design* of the documented
+  methodology against the claims and the Phase 2J gap. Consumes an open run with a finished Phase 2J run,
+  the claims and `EvaluationGraphState.submission`. Five bounded model tasks, every excerpt a code-sliced span
+  of the submission; requirement kinds, applicability, issues and track postures are decided in Python.
+  Reads neither `ProjectState.results` nor `.experiments`, performs no search, leaves the run non-terminal,
+  and is **not** the `METHODOLOGY` node (`METHODOLOGY`, `EXPERIMENT_REVIEW`, `SCORING`, `TRUST_GATE`,
+  `RED_TEAM` and every discovery node are in its `FORBIDDEN_NODES`).
 - The provider is injected per run via
   `config["configurable"]["structured_model_provider"]`, which is what keeps graph
   construction credential-free and tests deterministic.

@@ -22,6 +22,7 @@ from src.schemas.claim_alignment import ClaimEvidenceAlignmentRun
 from src.schemas.claim_evidence_score import ClaimEvidenceScoringRun
 from src.schemas.claim_sufficiency import ClaimSufficiencyRun
 from src.schemas.gap_assessment import GapAssessmentRun
+from src.schemas.methodology_review import MethodologyReviewRun
 from src.schemas.novelty_differentiation import NoveltyDifferentiationRun
 from src.schemas.open_source_prior_art import OpenSourcePriorArtRun
 from src.schemas.patent import PatentPriorArtRun
@@ -412,6 +413,13 @@ class ResearchRun(MawhibaModel):
         "an evidence-bounded posture, not an absence claim, not a methodology or "
         "result judgement and never a score (ADR-021).",
     )
+    methodology_review: MethodologyReviewRun | None = Field(
+        default=None,
+        description="Phase 3A methodology review over the verbatim submission, the "
+        "bound claims and the Phase 2J gap. On the run, never ProjectState.methodology: "
+        "a design-level posture per inherited track, never execution, result, "
+        "readiness or score (ADR-022).",
+    )
     errors: list[ResearchIssue] = Field(default_factory=list)
     started_at: UtcDatetime = Field(default_factory=utc_now)
     completed_at: UtcDatetime | None = None
@@ -531,6 +539,14 @@ class ResearchRun(MawhibaModel):
                         f"research_engineering_gap was bound to a different {binding.phase.value} run "
                         "than this research run carries (section 31)"
                     )
+        review = self.methodology_review
+        if review is not None:
+            if review.research_run_id != self.research_run_id:
+                raise ValueError("methodology_review belongs to a different research run")
+            if review.gap_run_id is not None and (gap is None or review.gap_run_id != gap.gap_run_id):
+                raise ValueError("methodology_review was built over a different Phase 2J run than this research run carries")
+            if review.nd_run_id is not None and (novelty is None or review.nd_run_id != novelty.nd_run_id):
+                raise ValueError("methodology_review was built over a different Phase 2I run than this research run carries")
         return self
 
     @property

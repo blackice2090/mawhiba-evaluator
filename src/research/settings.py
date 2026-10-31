@@ -26,6 +26,7 @@ from src.schemas.official import (
     OfficialSeed,
 )
 from src.schemas.gap_assessment import GapAssessmentBounds
+from src.schemas.methodology_review import MethodologyReviewBounds
 from src.schemas.novelty_differentiation import NoveltyComparisonBounds
 from src.schemas.research import QueryPlanLimits
 
@@ -283,6 +284,7 @@ class ResearchSettings(MawhibaModel):
     open_source: OpenSourceResearchSettings = Field(default_factory=OpenSourceResearchSettings)
     novelty: NoveltyComparisonBounds = Field(default_factory=NoveltyComparisonBounds)
     gap: GapAssessmentBounds = Field(default_factory=GapAssessmentBounds)
+    methodology: MethodologyReviewBounds = Field(default_factory=MethodologyReviewBounds)
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()
