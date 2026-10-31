@@ -55,6 +55,9 @@ ARABIC_AS_DATA: dict[Path, str] = {
     / "tests"
     / "fixtures"
     / "submissions.py": "synthetic Arabic student submissions",
+    PROJECT_ROOT / "tests" / "test_phase3b_safety.py": "Arabic and mixed-language prompt-injection sentences "
+    "inserted into a student submission as inert data, proving Phase 3B production records and postures do not "
+    "change with the language of injected source text",
     PROJECT_ROOT / "tests" / "test_phase3b_architecture.py": "Arabic and mixed-language prompt-injection "
     "sentences appended to a student protocol excerpt, proving Phase 3B rules and postures do not change "
     "with the language or content of inert source text",

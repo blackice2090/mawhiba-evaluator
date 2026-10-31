@@ -1,9 +1,8 @@
-# Phase 3B: Experiment Review (architecture)
+# Phase 3B: Experiment Review
 
-This is the architecture gate only. The contracts are in
-`src/schemas/experiment_review.py`, the decision is in ADR-023, and the
-architecture tests are in `tests/test_phase3b_architecture.py`. No production
-node, prompt or Gold exists yet.
+The contracts are in `src/schemas/experiment_review.py`, the decision is in
+ADR-023, and the architecture tests are in `tests/test_phase3b_architecture.py`.
+The production runtime is described in section 12. No Gold dataset exists yet.
 
 Phase 3B asks one question: *does the documented experiment / test protocol
 provide an adequate and auditable way to test the claim that matters?* It never
@@ -302,7 +301,7 @@ finalize. `ExperimentReviewRun` is reachable from `EvaluationGraphState` and is
 registered automatically. Catalog-only types are listed in
 `NON_CHECKPOINTED_TYPES` with reasons. JSON round-trips are equal.
 
-## 9. Architecture tests (run in this gate)
+## 9. Architecture tests
 
 `tests/test_phase3b_architecture.py` has 55 tests. They cover the reference
 world; the taxonomy and catalog; statistics, baseline-trigger and UNKNOWN-type
@@ -372,3 +371,110 @@ integration, language policy, workflow hardening.
   through its claim.
 - `TIMING_NOT_DOCUMENTED` does not block WELL. Only a criterion the student
   describes as post hoc does.
+
+## 12. Production implementation
+
+**Modules** (`src/research/experiments/`, one responsibility each):
+
+| module | responsibility |
+|---|---|
+| `binding.py` | bind run, submission (id + hash), claims, Phase 2J targets, Phase 3A context; fingerprints |
+| `calls.py` | the single bounded model-call path and its failure-code mapping |
+| `verify.py` | `ExperimentLedger`: exact anchoring, quarantine overlap refusal, rejection digests, prompt-leak and forbidden-prose checks, the masked submission |
+| `segment.py` | segmentation, the result quarantine, protocol identity and de-duplication, the experiment bound |
+| `protocol.py` | protocol extraction, catalog assembly, conditional applicability, the deterministic Phase 2J triggers |
+| `linkage.py` | target links, measurement bindings, baselines, comparability, conditions, HYBRID ownership |
+| `synthesis.py` | issues and postures (via the schema derivations), Phase 2J coverage, track and project postures |
+| `pipeline.py` | the seven stages, idempotent and replay-safe |
+
+`src/graph/experiment_nodes.py` and `src/graph/phase3b_graph.py`
+(`build_phase3b_experiment_graph()`) wrap the stages as the seven `NodeId`s
+`EXPERIMENT_BIND_INPUTS` ... `EXPERIMENT_FINALIZE`, whose values equal
+`ExperimentStage`. The graph leaves the research run non-terminal. Every Phase 3A
+node, `EXPERIMENT_REVIEW`, `METHODOLOGY`, `SCORING`, `TRUST_GATE`, `RED_TEAM`
+and every discovery node are in its `FORBIDDEN_NODES`. Bounds come from
+`ResearchSettings.experiment`. The provider comes from
+`config["configurable"]["structured_model_provider"]`.
+
+**Model tasks.** There are four structured tasks: `EXPERIMENT_SEGMENTATION`,
+`EXPERIMENT_PROTOCOL_EXTRACTION`, `EXPERIMENT_APPLICABILITY` and
+`EXPERIMENT_TARGET_LINKAGE`. Each has a V1 prompt sharing
+`EXPERIMENT_INPUT_BOUNDARY`. Only segmentation and extraction point at new
+submission text. Applicability and linkage cite labels (E, T, V, K) of records
+code has already verified, so they cannot introduce an excerpt or an id. An
+excerpt label outside the experiment's own excerpts is refused, so a metric
+cannot be borrowed from another experiment.
+
+**Call bound.** `model_calls_performed` counts provider requests with retries
+included. A call is made only while budget remains, and its retry limit is cut
+to the remaining budget. At most there is 1 segmentation call and, per
+experiment, 1 extraction, at most 1 applicability and 1 linkage call. No call is
+made for an UNKNOWN type's applicability.
+
+**Result quarantine.** Segmentation tags result spans. They are stored as
+`QuarantinedSpan` (offsets + hash). A defining or protocol span overlapping one
+is refused (`RESULT_LEAKAGE_ATTEMPT` in the rejection digest). Extraction is
+shown the submission with every quarantined span replaced by `[RESULT WITHHELD]`,
+and applicability and linkage see only verified protocol excerpts. A reported
+value therefore cannot steer a later model judgment, and no synthesis function
+takes a result argument. At segmentation, where the run-issue table does not list
+`RESULT_LEAKAGE_ATTEMPT`, the refusal is reported as `PARTIAL_MODEL_OUTPUT` with
+the precise code kept in the digest. Finalize re-checks that every excerpt and
+quarantined span still slices to its stored text or hash.
+
+**Applicability.** The catalog decides first (`resolve_applicability`). Only a
+`CONDITION_UNRESOLVED` cell is shown to the model, with its own triggers minus
+the two Phase 2J triggers, which are deterministic. A resolution needs at least
+one cited excerpt label. A missing judgment leaves the cell CONDITIONAL. The
+Phase 2J baseline and material-condition triggers are applied in the link stage,
+only for an experiment that test-links a requirement carrying them. Until then a
+row the model judged free of its own triggers stays CONDITIONAL with the
+judgment's excerpts recorded. It becomes NOT_APPLICABLE on that judgment only if
+no Phase 2J trigger reaches it.
+
+**Phase 2J continuity.** Every bound requirement is judged as a V target with
+its metric, baseline and condition dimensions shown as context. Coverage is
+`derive_phase2j_coverage` over records of one experiment at a time. An omitted
+target is an `UNRESOLVED` link, never `DOES_NOT_TEST`.
+
+**Linkage guards.** `ALIGNED_SAME_TARGET` needs a method and a metric excerpt.
+`DIRECTLY_TESTS` without an aligned measurement of the same experiment and
+target is reduced to `PARTIALLY_TESTS`. A testing relation with no cited
+protocol is `UNRESOLVED`. Baseline relevance needs a permitted ground. A
+comparability `NOT_APPLICABLE` from the model is read as `UNRESOLVED`.
+`SAME_EVALUATION_METRIC` is set deterministically only from the experiment's own
+aligned metric binding for that target.
+
+**HYBRID ownership.** The tested requirements' single facet decides first
+(`PHASE_2J_LIMITATION_FACET`), then the extraction's bounded proposal with
+excerpts, otherwise `UNRESOLVED`.
+
+**Provider failures.** Each failure has its own code and fails closed:
+`MODEL_PROVIDER_MISSING` (segmentation), `MODEL_CALL_BOUND_REACHED`,
+`MODEL_REFUSED`, `MODEL_RESPONSE_INVALID` (parse, empty or provider error) and
+`PARTIAL_MODEL_OUTPUT` (incomplete output or unjudged items). A failed extraction
+leaves the experiment UNKNOWN with every applicable requirement
+`INSUFFICIENT_SOURCE_COVERAGE`. A failed linkage leaves every target
+`UNRESOLVED`. A failed applicability call leaves the cells CONDITIONAL.
+
+**Finalize.** It compares fingerprints and checks source integrity. A mismatch
+gives `INVALIDATED_UPSTREAM_MUTATED` with no experiment, coverage or posture
+kept. A run whose experiment set hit `max_experiments` ends `INSUFFICIENT_INPUT`
+with no project posture, because a truncated set is never read as complete.
+Otherwise the run is `COMPLETED` with the derived project posture.
+
+**Production tests.** `tests/test_phase3b_pipeline.py`,
+`tests/test_phase3b_trust.py` and `tests/test_phase3b_safety.py` run focused
+fixtures (`tests/phase3b_support.py`, a scripted untrusted model) over a real
+Phase 2E-3A upstream. They are not Gold.
+
+**Implementation limitations** (in addition to section 11):
+
+- Quarantine completeness depends on the segmentation model. An untagged result
+  sentence could be cited as protocol text. The structural guarantee covers only
+  tagged spans.
+- The forbidden-prose check on advisory rationales is an English lexicon and
+  defense in depth only. The language-independent defense is that no rationale
+  is persisted and every canonical field is typed.
+- Phase 2J condition text is not stored upstream. The linkage model sees only
+  each condition's dimension.

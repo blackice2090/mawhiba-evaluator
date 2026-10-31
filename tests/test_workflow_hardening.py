@@ -626,6 +626,21 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "RequirementEvidenceDTO",
         "SubmissionSpanDTO",
         "TargetLinkageResponse",
+        # Phase 3B model-facing DTOs: the untrusted segmentation, protocol-extraction
+        # and target-linkage responses are verified inside the stage that receives them
+        # (exact StudentExperimentExcerpts, QuarantinedSpans, closed enums, label->id
+        # maps) and then discarded. Only the verified canonical records reach a
+        # checkpoint; no DTO field (prose, rationale, offsets, labels) is stored. The
+        # Phase 3B DTOs that share a name with an earlier phase's are covered above.
+        "BaselineDTO",
+        "ComparabilityDTO",
+        "ExperimentSegmentDTO",
+        "MeasurementDTO",
+        "ProtocolExtractionResponse",
+        "ProtocolRequirementDTO",
+        "ResultSpanDTO",
+        "SegmentationResponse",
+        "TargetJudgmentDTO",
         # Phase 3A run bounds: configuration read per run from ResearchSettings.methodology,
         # like GapAssessmentBounds; never part of the persisted run.
         "MethodologyReviewBounds",

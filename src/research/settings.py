@@ -25,6 +25,7 @@ from src.schemas.official import (
     OfficialPageKind,
     OfficialSeed,
 )
+from src.schemas.experiment_review import ExperimentReviewBounds
 from src.schemas.gap_assessment import GapAssessmentBounds
 from src.schemas.methodology_review import MethodologyReviewBounds
 from src.schemas.novelty_differentiation import NoveltyComparisonBounds
@@ -285,6 +286,7 @@ class ResearchSettings(MawhibaModel):
     novelty: NoveltyComparisonBounds = Field(default_factory=NoveltyComparisonBounds)
     gap: GapAssessmentBounds = Field(default_factory=GapAssessmentBounds)
     methodology: MethodologyReviewBounds = Field(default_factory=MethodologyReviewBounds)
+    experiment: ExperimentReviewBounds = Field(default_factory=ExperimentReviewBounds)
 
 
 DEFAULT_RESEARCH_SETTINGS = ResearchSettings()
