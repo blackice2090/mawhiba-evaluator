@@ -441,6 +441,15 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         # Phase 3A requirement catalog row: import-time policy (REQUIREMENT_CATALOG);
         # a run persists the resolved RequirementApplicability, never the row.
         "CatalogEntry",
+        # Phase 3B requirement catalog row: import-time policy (EXPERIMENT_CATALOG);
+        # a run persists the resolved ExperimentRequirement, never the row.
+        "ExperimentCatalogEntry",
+        # Phase 3B catalog/policy enums: they key import-time tables (EXPERIMENT_CATALOG,
+        # FAIRNESS_REQUIRED_BY_FAMILY) or are a derived return value
+        # (ExperimentBaselineRecord.rollup); no checkpointed field holds them.
+        "ExperimentFamily",
+        "RequirementGroup",
+        "ComparabilityRollup",
         # Workflow-layer input contracts: validated and discarded at the
         # boundary; only their effect on ProjectState is persisted.
         "ProjectPatch",
@@ -583,6 +592,8 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "GapGoldCase",
         # Phase 3A Gold eval layer: an offline measurement artifact that never touches a checkpoint.
         "MethodGoldCase",
+        # Phase 3B Gold eval layer: an offline measurement artifact that never touches a checkpoint.
+        "ExperimentGoldCase",
         # Phase 2J model-facing DTOs. The untrusted boundary of the gap
         # candidate extraction, project-linkage and counterevidence calls:
         # validated inside the verifier in the same node, mapped to exact
@@ -617,6 +628,21 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "RequirementEvidenceDTO",
         "SubmissionSpanDTO",
         "TargetLinkageResponse",
+        # Phase 3B model-facing DTOs: the untrusted segmentation, protocol-extraction
+        # and target-linkage responses are verified inside the stage that receives them
+        # (exact StudentExperimentExcerpts, QuarantinedSpans, closed enums, label->id
+        # maps) and then discarded. Only the verified canonical records reach a
+        # checkpoint; no DTO field (prose, rationale, offsets, labels) is stored. The
+        # Phase 3B DTOs that share a name with an earlier phase's are covered above.
+        "BaselineDTO",
+        "ComparabilityDTO",
+        "ExperimentSegmentDTO",
+        "MeasurementDTO",
+        "ProtocolExtractionResponse",
+        "ProtocolRequirementDTO",
+        "ResultSpanDTO",
+        "SegmentationResponse",
+        "TargetJudgmentDTO",
         # Phase 3A run bounds: configuration read per run from ResearchSettings.methodology,
         # like GapAssessmentBounds; never part of the persisted run.
         "MethodologyReviewBounds",
