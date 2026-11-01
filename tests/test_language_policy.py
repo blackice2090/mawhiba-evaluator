@@ -38,6 +38,9 @@ EXEMPT_PATHS = {PROJECT_ROOT / "docs" / "mawhiba_agent_system_architecture_v1.md
 # why that file legitimately carries Arabic characters, so the exemption is a
 # reviewed decision rather than a growing escape hatch.
 ARABIC_AS_DATA: dict[Path, str] = {
+    PROJECT_ROOT / "scripts" / "phase3b_gold_lang.py": "Phase 3B Gold student experiment-protocol sentences in Arabic and mixed language, including instruction-like and forged-marker ones kept as inert exact-excerpt data",
+    PROJECT_ROOT / "scripts" / "phase3b_gold_templates4.py": "Phase 3B Gold Arabic-script data: diacritized sentences, Arabic-Indic digits, bidi marks and number words that exact-excerpt verification must treat as plain text",
+    PROJECT_ROOT / "evals" / "experiment_review" / "v1" / "cases.jsonl": "synthetic Arabic and mixed-language student experiment text, including instruction-like and forged-marker sentences that must stay inert data",
     PROJECT_ROOT / "scripts" / "phase3a_gold_lang.py": "Phase 3A Gold student methodology sentences in Arabic and mixed language, including instruction-like ones kept as inert exact-excerpt data",
     PROJECT_ROOT / "scripts" / "phase3a_gold_templates2.py": "Phase 3A Gold templates carrying a diacritized Arabic sentence and Arabic prose-twin text as data",
     PROJECT_ROOT / "scripts" / "phase3a_gold_templates3.py": "Phase 3A Gold templates carrying Arabic prose-twin text as data",

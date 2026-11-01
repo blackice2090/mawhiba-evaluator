@@ -24,6 +24,7 @@ from src.research.methodology.inventory import bind_claims
 from src.schemas.common import ProjectType
 from src.schemas.experiment_review import (
     BoundValidationTarget,
+    ExperimentReviewBounds,
     ExperimentReviewRun,
     ExperimentRunIssue,
     ExperimentRunIssueCode,
@@ -123,8 +124,13 @@ def bound_targets(research_run: ResearchRun, claims: list[BoundClaim]) -> list[B
 def open_experiment_run(
     research_run: ResearchRun, project: ProjectState, submission: StudentSubmissionArtifact | None,
     started_at: datetime, *, provider_name: str | None = None, model_name: str | None = None,
+    bounds: ExperimentReviewBounds | None = None,
 ) -> ExperimentReviewRun:
-    """Bind the run to its authoritative inputs, or end it INSUFFICIENT_INPUT with the reason stated."""
+    """Bind the run to its authoritative inputs, or end it INSUFFICIENT_INPUT with the reason stated.
+
+    The run records the bounds the stages will ACTUALLY use, so the source window, the experiment bound and the
+    model-call bound that finalize and the run validator re-check are the ones the model was held to."""
+    bounds = bounds or ExperimentReviewBounds()
     errors = binding_problems(research_run, project, submission)
     run_id = experiment_run_id_for(research_run.research_run_id)
     claims = bind_claims(list(project.claims))
@@ -133,7 +139,7 @@ def open_experiment_run(
     if errors:
         return ExperimentReviewRun(
             experiment_run_id=run_id, research_run_id=research_run.research_run_id,
-            status=ExperimentRunStatus.INSUFFICIENT_INPUT,
+            status=ExperimentRunStatus.INSUFFICIENT_INPUT, bounds=bounds,
             versions=ExperimentRunVersions(model_provider=provider_name, model_name=model_name),
             upstream_bindings=bindings, bound_claims=claims, errors=errors, stage_markers=list(ExperimentStage),
             started_at=started_at, completed_at=started_at)
@@ -142,7 +148,7 @@ def open_experiment_run(
     project_type = project.identity.project_type
     return ExperimentReviewRun(
         experiment_run_id=run_id, research_run_id=research_run.research_run_id, gap_run_id=gap.gap_run_id,
-        methodology_run_id=review.methodology_run_id, status=ExperimentRunStatus.RUNNING,
+        methodology_run_id=review.methodology_run_id, status=ExperimentRunStatus.RUNNING, bounds=bounds,
         versions=ExperimentRunVersions(model_provider=provider_name, model_name=model_name),
         canonical_project_type=project_type, tracks=list(tracks_for(project_type)),
         submission_artifact_id=submission.artifact_id, submission_content_hash=submission.content_hash,

@@ -68,7 +68,7 @@ def bind_experiment_inputs(state: EvaluationGraphState, config: RunnableConfig) 
     opened = xp.open_run(
         run, state.project, state.submission, started_at,
         provider_name=getattr(provider, "name", None) if provider is not None else None,
-        model_name=llm.extraction_model if provider is not None else None)
+        model_name=llm.extraction_model if provider is not None else None, bounds=_bounds(config))
     return _done(
         state, node, started_at,
         f"Phase 3B run opened ({opened.status.value}); {len(opened.bound_claims)} claims and "

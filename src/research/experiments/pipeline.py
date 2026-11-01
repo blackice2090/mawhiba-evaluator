@@ -106,9 +106,9 @@ def target_texts(research_run: ResearchRun) -> linkage.TargetText:
 
 def open_run(research_run: ResearchRun, project: ProjectState, submission: StudentSubmissionArtifact | None,
              started_at: datetime, *, provider_name: str | None = None, model_name: str | None = None,
-             ) -> ExperimentReviewRun:
+             bounds: ExperimentReviewBounds | None = None) -> ExperimentReviewRun:
     return binding.open_experiment_run(research_run, project, submission, started_at, provider_name=provider_name,
-                                       model_name=model_name)
+                                       model_name=model_name, bounds=bounds)
 
 
 def segment_stage(run: ExperimentReviewRun, submission: StudentSubmissionArtifact,

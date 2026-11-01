@@ -357,7 +357,7 @@ def run_stages(state: EvaluationGraphState, provider: Any, *, bounds: Experiment
     llm = LLMSettings()
     rr, project, submission = state.active_research_run, state.project, state.submission
     now = datetime(2026, 10, 31, tzinfo=UTC)
-    run = xp.open_run(rr, project, submission, now)
+    run = xp.open_run(rr, project, submission, now, bounds=bounds)
     if run.is_terminal:
         return run
     run = xp.segment_stage(run, submission, provider, llm, bounds)
