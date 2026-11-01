@@ -11,6 +11,7 @@ section 34).
 
 from __future__ import annotations
 
+import re
 from typing import Final
 
 from src.research.vocabulary import QUERY_CONNECTOR_TOKENS
@@ -1147,19 +1148,39 @@ EXPERIMENT_ITEMS_MARKER: Final[str] = "=== ITEMS TO JUDGE ==="
 EXPERIMENT_END_MARKER: Final[str] = "=== END OF UNTRUSTED CONTENT ==="
 
 
+_ESCAPE_CHAR = chr(0x200B)  # ZERO WIDTH SPACE
+_EQ_RUN = re.compile("=(?==)")
+_EQ_ESCAPED = re.compile("=" + _ESCAPE_CHAR + "(?==)")
+
+
+def escape_untrusted(text: str) -> str:
+    """Structurally neutralize the ``===`` that every boundary marker is built from.
+
+    A zero-width character is inserted between any two adjacent ``=``, so no ``===`` (and
+    therefore no marker) can occur in escaped student text, in any language, however it is
+    repeated. The escape is reversible (``unescape_untrusted``) and applies to the prompt
+    representation only: canonical evidence is always sliced from the original text."""
+    return _EQ_RUN.sub("=" + _ESCAPE_CHAR, text)
+
+
+def unescape_untrusted(text: str) -> str:
+    return _EQ_ESCAPED.sub("=", text)
+
+
 def build_experiment_user_input(
     *, submission_text: str | None = None, targets: tuple[str, ...] | list[str] = (),
     excerpts: tuple[tuple[str, str], ...] | list[tuple[str, str]] = (), items: tuple[str, ...] | list[str] = (),
 ) -> str:
-    """Untrusted blocks (submission, claims/targets, excerpts as (label, text)), then
-    the code-built item lines. Nothing here is a verdict or a score."""
+    """Untrusted blocks (submission, claims/targets, excerpts as (label, text)), then the
+    code-built item lines. EVERY student-controlled string is escaped and sits before the
+    end marker; ``items`` must carry only code-built labels and closed enum values."""
     lines: list[str] = []
     if submission_text is not None:
-        lines += [EXPERIMENT_SUBMISSION_MARKER, submission_text, ""]
+        lines += [EXPERIMENT_SUBMISSION_MARKER, escape_untrusted(submission_text), ""]
     if targets:
-        lines += [EXPERIMENT_CLAIMS_MARKER, *targets, ""]
+        lines += [EXPERIMENT_CLAIMS_MARKER, *(escape_untrusted(t) for t in targets), ""]
     if excerpts:
-        lines += [EXPERIMENT_EXCERPTS_MARKER, *(f"[{label}] {text}" for label, text in excerpts), ""]
+        lines += [EXPERIMENT_EXCERPTS_MARKER, *(f"[{label}] {escape_untrusted(text)}" for label, text in excerpts), ""]
     lines += [EXPERIMENT_END_MARKER, "", EXPERIMENT_ITEMS_MARKER, *items]
     return "\n".join(lines)
 

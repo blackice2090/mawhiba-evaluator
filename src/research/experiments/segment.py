@@ -23,11 +23,12 @@ from uuid import UUID
 
 from src.config.settings import LLMSettings
 from src.llm.contracts import ModelTask
-from src.llm.prompts import EXPERIMENT_SEGMENTATION_PROMPT_V1, build_experiment_user_input
+from src.llm.prompts import EXPERIMENT_SEGMENTATION_PROMPT_V1, build_experiment_user_input, unescape_untrusted
 from src.llm.provider import StructuredModelProvider
 from src.research.experiments.calls import FAILURE_MESSAGES, call_model
 from src.research.experiments.dto import SegmentationResponse
 from src.research.experiments.verify import ExperimentLedger, parse_enum
+from src.research.novelty.anchoring import occurrences
 from src.schemas.methodology_review import MethodologyTrack
 from src.schemas.experiment_review import (
     ExperimentPosture,
@@ -81,8 +82,7 @@ def segment(
     run, bounds = ledger.run, ledger.bounds
     outcome = call_model(
         provider, task=ModelTask.EXPERIMENT_SEGMENTATION, prompt=EXPERIMENT_SEGMENTATION_PROMPT_V1,
-        user_input=build_experiment_user_input(submission_text=ledger.submission_text[: bounds.max_submission_chars],
-                                               items=_items(ledger)),
+        user_input=build_experiment_user_input(submission_text=ledger.window_text(), items=_items(ledger)),
         response_model=SegmentationResponse, llm_settings=llm_settings, bounds=bounds,
         performed=run.model_calls_performed)
     if not outcome.succeeded:
@@ -91,20 +91,37 @@ def segment(
     response: SegmentationResponse = outcome.parsed
 
     # -- the quarantine first: a result span always wins over a protocol span ----------
+    # Fail closed. Every exact occurrence of a declared result inside the model-visible window is
+    # quarantined (a repeated sentence is not an error, it is more to withhold). A declared span that
+    # cannot be safely quarantined is never dropped silently: the run records an incomplete
+    # quarantine and cannot reach a strong posture (``pipeline`` blocks later stages and finalize).
     quarantine: dict[tuple[int, int], QuarantinedSpan] = {}
-    for dto in sorted(response.results, key=lambda r: (r.span.excerpt, r.span.start or -1, r.kind)):
+    window = ledger.window_text()
+    for dto in sorted(response.results, key=lambda r: (r.span.excerpt, r.kind)):
         kind = parse_enum(QuarantineKind, dto.kind)
-        located = ledger.locate_span(dto.span)
-        if located is None:
-            continue
         if kind is None:  # an unknown kind is still a result span; it is quarantined as a conclusion
             ledger.reject(_C.PARTIAL_MODEL_OUTPUT, dto.kind, "an unknown result kind was quarantined as CONCLUSION")
             kind = QuarantineKind.CONCLUSION
-        span_key = (located.start, located.end)
-        quarantine.setdefault(span_key, QuarantinedSpan(
-            span_id=experiment_uuid(run.experiment_run_id, "quarantine", *span_key), experiment_run_id=run.experiment_run_id,
-            kind=kind, start=located.start, end=located.end,
-            span_hash=text_hash(ledger.submission_text[located.start:located.end])))
+        text = unescape_untrusted(dto.span.excerpt or "")
+        positions = occurrences(window, text) if text.strip() else []
+        if not positions and text != text.strip() and text.strip():
+            text = text.strip()
+            positions = occurrences(window, text)
+        spans = [(p, p + len(text)) for p in positions]
+        # a result cut by the window edge: its visible prefix is withheld too
+        edge = next((k for k in range(min(len(text) - 1, len(window)), 0, -1) if window.endswith(text[:k])), 0)
+        if edge:
+            spans.append((len(window) - edge, len(window)))
+        if not spans or len(spans) > bounds.max_excerpts:
+            ledger.reject(_C.EXACT_EXCERPT_MISMATCH, text, "a declared result span could not be located exactly")
+            ledger.mark_quarantine_incomplete()
+            continue
+        for lo, hi in spans:
+            span_key = (ledger.window.start + lo, ledger.window.start + hi)
+            quarantine.setdefault(span_key, QuarantinedSpan(
+                span_id=experiment_uuid(run.experiment_run_id, "quarantine", *span_key),
+                experiment_run_id=run.experiment_run_id, kind=kind, start=span_key[0], end=span_key[1],
+                span_hash=text_hash(ledger.submission_text[span_key[0]:span_key[1]])))
     q_spans = sorted(quarantine.values(), key=lambda q: (q.start, q.end))
     ledger.run = run.model_copy(update={"quarantine": q_spans})
 

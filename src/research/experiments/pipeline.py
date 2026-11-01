@@ -28,7 +28,7 @@ from src.config.settings import LLMSettings
 from src.graph.state import ProjectState
 from src.llm.provider import StructuredModelProvider
 from src.research.experiments import binding, linkage, protocol, segment, synthesis
-from src.research.experiments.verify import ExperimentLedger
+from src.research.experiments.verify import ExperimentLedger, SourceWindow, quarantine_incomplete
 from src.research.methodology.inventory import bind_claims
 from src.schemas.experiment_review import (
     ExperimentReviewBounds,
@@ -56,6 +56,12 @@ def settle(run: ExperimentReviewRun, **changes: Any) -> ExperimentReviewRun:
 
 def _done(run: ExperimentReviewRun, stage: ExperimentStage) -> bool:
     return stage in run.stage_markers or run.is_terminal
+
+
+def _skip(run: ExperimentReviewRun, stage: ExperimentStage) -> ExperimentReviewRun:
+    """Fail closed after an incomplete result quarantine: the stage makes no model call (an
+    unquarantined result may be in the source) and records nothing but that it was passed."""
+    return settle(run, stage_markers=[*run.stage_markers, stage])
 
 
 def _ledger(run: ExperimentReviewRun, submission: StudentSubmissionArtifact, bounds: ExperimentReviewBounds,
@@ -121,6 +127,8 @@ def extract_stage(run: ExperimentReviewRun, submission: StudentSubmissionArtifac
                   ) -> ExperimentReviewRun:
     if _done(run, _S.EXTRACT_PROTOCOL):
         return run
+    if quarantine_incomplete(run):
+        return _skip(run, _S.EXTRACT_PROTOCOL)
     ledger = _ledger(run, submission, bounds, _S.EXTRACT_PROTOCOL)
     performed, records = run.model_calls_performed, []
     for record in _in_document_order(run):
@@ -135,6 +143,8 @@ def applicability_stage(run: ExperimentReviewRun, project: ProjectState, submiss
                         bounds: ExperimentReviewBounds) -> ExperimentReviewRun:
     if _done(run, _S.RESOLVE_APPLICABILITY):
         return run
+    if quarantine_incomplete(run):
+        return _skip(run, _S.RESOLVE_APPLICABILITY)
     ledger = _ledger(run, submission, bounds, _S.RESOLVE_APPLICABILITY)
     texts = claim_texts(project)
     claims = [(t.label, texts.get(t.claim_id, "")) for t in linkage.target_set(ledger) if t.validation is None]
@@ -152,6 +162,8 @@ def link_stage(run: ExperimentReviewRun, research_run: ResearchRun, project: Pro
                llm: LLMSettings | None, bounds: ExperimentReviewBounds) -> ExperimentReviewRun:
     if _done(run, _S.LINK_TARGETS):
         return run
+    if quarantine_incomplete(run):
+        return _skip(run, _S.LINK_TARGETS)
     ledger = _ledger(run, submission, bounds, _S.LINK_TARGETS)
     texts, context = claim_texts(project), target_texts(research_run)
     performed, records, links, measurements, baselines, conditions = run.model_calls_performed, [], [], [], [], []
@@ -182,8 +194,9 @@ def _source_intact(run: ExperimentReviewRun, submission: StudentSubmissionArtifa
     if submission is None:
         return not run.excerpts and not run.quarantine
     text = submission.original_text
-    return all(e.matches(text) for e in run.excerpts) and all(
-        q.end <= len(text) and text_hash(text[q.start:q.end]) == q.span_hash for q in run.quarantine)
+    window = SourceWindow.of(text, run.bounds)  # the same window the model was shown
+    return all(e.matches(text) and window.contains(e.start, e.end) for e in run.excerpts) and all(
+        window.contains(q.start, q.end) and text_hash(text[q.start:q.end]) == q.span_hash for q in run.quarantine)
 
 
 def finalize_stage(run: ExperimentReviewRun, research_run: ResearchRun, project: ProjectState,
@@ -209,6 +222,12 @@ def finalize_stage(run: ExperimentReviewRun, research_run: ResearchRun, project:
                       measurements=[], baselines=[], conditions=[], phase2j_coverage=[], track_postures=[],
                       untested_claim_ids=[], errors=[*run.errors, issue], stage_markers=markers,
                       completed_at=done_at)
+    if quarantine_incomplete(run):
+        # A declared result span could not be quarantined, so a result may be visible to protocol
+        # judgments. Nothing derived from them is kept and no posture is issued.
+        return settle(run, status=ExperimentRunStatus.INSUFFICIENT_INPUT, experiments=[], links=[],
+                      measurements=[], baselines=[], conditions=[], phase2j_coverage=[], track_postures=[],
+                      untested_claim_ids=[], project_posture=None, stage_markers=markers, completed_at=done_at)
     if any(e.code is ExperimentRunIssueCode.EXPERIMENT_BOUND_REACHED for e in run.errors):
         return settle(run, status=ExperimentRunStatus.INSUFFICIENT_INPUT, stage_markers=markers, completed_at=done_at)
     return settle(run, status=ExperimentRunStatus.COMPLETED, project_posture=synthesis.project_posture(run),

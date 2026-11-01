@@ -468,11 +468,43 @@ Otherwise the run is `COMPLETED` with the derived project posture.
 fixtures (`tests/phase3b_support.py`, a scripted untrusted model) over a real
 Phase 2E-3A upstream. They are not Gold.
 
+**Pre-Gold security hardening.** A post-commit review found three production defects, all
+fixed without changing the architecture, the schema or ADR-023.
+
+- *Untrusted prompt boundary.* Every student-controlled string (the submission, claims,
+  Phase 2J anchor text, the experiment's defining excerpts and protocol excerpts) is rendered
+  only inside the untrusted blocks, before `EXPERIMENT_END_MARKER`. The trusted tail carries
+  only code-built labels and closed enum values. Before insertion `escape_untrusted` puts a
+  zero-width space between every two adjacent `=`, so no `===` (and so no boundary marker)
+  can occur in escaped student text, in any language. The escape is structural, not a keyword
+  list, and reversible: the model's quote is unescaped before matching, and the stored excerpt
+  is always the original slice of the submission. Text that already contains the escape
+  sequence fails closed (the quote does not match).
+- *Source-window parity.* `SourceWindow` (in `verify.py`) is the one deterministic
+  model-visible slice, `[0, min(len, max_submission_chars))` in original coordinates. The order
+  is window first, then masking inside the window, then the prompt. Segmentation, extraction,
+  the ledger's anchoring and finalize all use the same window, so an excerpt that starts,
+  ends or lies outside it cannot be located, and a repeat outside it cannot substitute for an
+  occurrence inside it. Masking changes only the model's copy and never shifts an offset.
+  Finalize also rejects any stored excerpt or quarantined span outside the window.
+- *Fail-closed result quarantine.* For every declared result span, every exact occurrence in the
+  window is quarantined (offsets and a hash only), whatever its length. A result cut by the
+  window edge has its visible prefix withheld. A declared span that cannot be located (or is
+  empty, or matches more than `max_excerpts` times) is never dropped silently: the run records
+  `PARTIAL_MODEL_OUTPUT` at `EXPERIMENT_SEGMENT` with a fixed incomplete-quarantine message, plus
+  the precise rejection digest. Stages after segmentation then make no model call, and finalize
+  ends the run `INSUFFICIENT_INPUT` with no experiment, link, coverage or posture, so it cannot
+  reach `WELL_SPECIFIED`. The flag is derived from persisted run issues, so it survives a
+  checkpoint and a replay. Where a result and a protocol excerpt overlap, the result wins.
+
+`quarantine complete` means only that every result span the segmentation output declared was
+safely processed. It is not proof that segmentation found every real result.
+
 **Implementation limitations** (in addition to section 11):
 
-- Quarantine completeness depends on the segmentation model. An untagged result
-  sentence could be cited as protocol text. The structural guarantee covers only
-  tagged spans.
+- Quarantine completeness depends on the segmentation model's recall. A result sentence it never
+  declares could be cited as protocol text. The structural guarantee covers only declared spans;
+  recall is a model limitation to be measured in Gold, not a proven property.
 - The forbidden-prose check on advisory rationales is an English lexicon and
   defense in depth only. The language-independent defense is that no rationale
   is persisted and every canonical field is typed.

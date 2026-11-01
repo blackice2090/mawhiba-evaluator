@@ -30,7 +30,7 @@ from src.llm.prompts import (
 from src.llm.provider import StructuredModelProvider
 from src.research.experiments.calls import FAILURE_MESSAGES, CallOutcome, call_model
 from src.research.experiments.dto import ApplicabilityResponse, ProtocolExtractionResponse
-from src.research.experiments.verify import ExperimentLedger, masked_submission, parse_enum
+from src.research.experiments.verify import ExperimentLedger, parse_enum
 from src.schemas.experiment_review import (
     ALLOWED_ADEQUACY,
     BARE_QUANTITY,
@@ -127,14 +127,14 @@ def pending_conditionals(record: ExperimentRecord) -> list[ExperimentRequirement
 # -- extraction -------------------------------------------------------------------------
 
 
-def _extraction_items(ledger: ExperimentLedger, record: ExperimentRecord) -> list[str]:
-    defining = [f"[D{n}] {ledger.excerpts[i].excerpt}" for n, i in enumerate(record.defining_excerpt_ids, 1)]
+def _extraction_items(ledger: ExperimentLedger) -> list[str]:
+    """Code-built items only: closed enum values. No student text may appear here."""
     tracks = ", ".join(t.value for t in ledger.run.tracks)
     return [
-        "EXPERIMENT DEFINING EXCERPTS (untrusted content):", *defining,
         f"PROJECT TRACKS: {tracks}",
         f"EXPERIMENT TYPES: {', '.join(t.value for t in ExperimentType)}",
         f"REQUIREMENT KINDS: {', '.join(k.value for k in ERK)}",
+        "The experiment's defining excerpts are D1, D2, ... in the untrusted excerpts block above.",
     ]
 
 
@@ -170,10 +170,11 @@ def extract_protocol(
 ) -> tuple[ExperimentRecord, CallOutcome]:
     """Assess one segmented experiment. A failed call fails closed: type UNKNOWN and every
     applicable requirement INSUFFICIENT_SOURCE_COVERAGE (so never WELL_SPECIFIED)."""
-    shown = masked_submission(ledger.submission_text, ledger.run.quarantine)[: ledger.bounds.max_submission_chars]
+    defining = [(f"D{n}", ledger.excerpts[i].excerpt) for n, i in enumerate(record.defining_excerpt_ids, 1)]
     outcome = call_model(
         provider, task=ModelTask.EXPERIMENT_PROTOCOL_EXTRACTION, prompt=EXPERIMENT_PROTOCOL_EXTRACTION_PROMPT_V1,
-        user_input=build_experiment_user_input(submission_text=shown, items=_extraction_items(ledger, record)),
+        user_input=build_experiment_user_input(submission_text=ledger.shown_text(), excerpts=defining,
+                                               items=_extraction_items(ledger)),
         response_model=ProtocolExtractionResponse, llm_settings=llm_settings, bounds=ledger.bounds,
         performed=performed)
     if not outcome.succeeded:
