@@ -592,6 +592,8 @@ NON_CHECKPOINTED_TYPES: frozenset[str] = frozenset(
         "GapGoldCase",
         # Phase 3A Gold eval layer: an offline measurement artifact that never touches a checkpoint.
         "MethodGoldCase",
+        # Phase 3B Gold eval layer: an offline measurement artifact that never touches a checkpoint.
+        "ExperimentGoldCase",
         # Phase 2J model-facing DTOs. The untrusted boundary of the gap
         # candidate extraction, project-linkage and counterevidence calls:
         # validated inside the verifier in the same node, mapped to exact
